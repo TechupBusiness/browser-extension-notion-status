@@ -2,6 +2,10 @@
 
 This browser extension shows whether the current webpage URL is stored in your selected Notion database. The extension icon turns green if the URL is found, red if it isn't and orange if the beginning domain/folder of the URL are found (but not the full current URL).
 
+![Extension Status Examples](images/screenshot-status-green.png)   
+
+*Example: Green status indicating the current URL is found in your Notion database*
+
 ## Features
 
 - Easy setup with Notion Integration Token
@@ -10,8 +14,7 @@ This browser extension shows whether the current webpage URL is stored in your s
 - Automatic background syncing based on Last Edited Time
 - Cache-only checks during normal browsing for better performance
 - Full API checks when you click the extension icon
-- Works with Chrome and Firefox
-- SVG icons for crisp rendering at all scales
+- Works with Chrome and Firefox (and other browsers too)
 
 ## Installation
 
@@ -34,6 +37,10 @@ This browser extension shows whether the current webpage URL is stored in your s
 
 Before using the extension, you need to set it up with your Notion Integration Token:
 
+![Options Page](images/screenshot-options.png)   
+
+*The extension options page where you configure your Notion connection*
+
 1. Create an Internal Integration at https://www.notion.so/my-integrations
    - Give it a name (e.g., "Notion Status Extension")
    - Select your workspace
@@ -48,15 +55,22 @@ Before using the extension, you need to set it up with your Notion Integration T
 
 5. Click "Connect to Notion" to authenticate
 
-6. Select your database containing the URLs
+6. **IMPORTANT**: You must manually share your database with the integration:
+   - In Notion, open the database you want to use
+   - Click the "Share" button in the top-right corner
+   - Hover on "Connections"
+   - Search for your connection by name and click on it
+   - If you don't see your database in the extension after this step, click "Refresh Databases"
 
-7. Select the URL property (must be a URL type property)
+7. Select your database containing the URLs
 
-8. Select a Last Edited Time property (for efficient delta syncing)
+8. Select the URL property (must be a URL type property)
 
-9. Set your preferred cache duration
+9. Select a Last Edited Time property (for efficient delta syncing)
 
-10. Save settings
+10. Set your preferred cache duration
+
+11. Save settings
 
 ## How It Works
 
@@ -66,6 +80,13 @@ Before using the extension, you need to set it up with your Notion Integration T
    - Orange if a parent URL (like the domain or folder) is found
    - Red if the URL is not found
    - Gray if the status is unknown or the extension is not configured
+
+   | Status | Meaning | Example |
+   |--------|---------|---------|
+   | ![Green Status](images/screenshot-status-green.png) | URL found in Notion | The exact URL is in your database |
+   | ![Orange Status](images/screenshot-status-orange.png) | Similar URL found | A parent URL or domain match is found |
+   | ![Red Status](images/screenshot-status-red.png) | URL not found | No matching URL in your database |
+   | ![Gray Status](images/screenshot-status-gray.png) | Status unknown | Extension not configured or browser URL |
 
 3. Clicking on the extension icon triggers a fresh check with the Notion API
 4. The extension uses a cache to minimize API calls, with your configurable duration
@@ -82,6 +103,10 @@ The extension provides two ways to sync with your Notion database:
 ## Domain Exclusion Rules & Custom Patterns
 
 The extension allows you to customize how "similar" URLs are detected through domain rules:
+
+![Orange Status Example](images/screenshot-status-orange.png)   
+
+*Example: Orange status showing a similar URL found (based on domain/path pattern matching)*
 
 ### Pattern Syntax
 
@@ -129,11 +154,25 @@ The extension comes with pre-configured patterns for common websites:
 | Amazon | `/dp/*` | Product level |
 | Medium | `/@*/*` | Article level |
 
+The extension also includes rules to automatically ignore browser-specific URLs (like chrome:// or about: pages):
+
+![Gray Status Example](images/screenshot-status-gray.png)   
+
+*Example: Gray status for a browser-specific URL that is excluded from checking*
+
 ## Note About Notion API
 
 This extension uses Notion's official API with an Integration Token. The Integration Token does not expire unless you manually revoke it from your Notion settings.
 
-You must share your database with the integration for it to work. In your Notion database, click "Share" and select your integration from the list.
+You must share your database with the integration for it to work:
+
+1. In Notion, open the database you want to use
+2. Click the "Share" button in the top-right corner
+3. Click "Add people, emails, groups, or integrations"
+4. Search for your integration by name and select it
+5. Click "Invite"
+
+If you don't see your database in the extension after sharing, click "Refresh Databases" in the extension options.
 
 ## Development
 

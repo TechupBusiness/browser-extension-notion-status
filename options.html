@@ -25,6 +25,10 @@
       <div id="auth-status">Not logged in</div>
       <button id="login-button">Connect to Notion</button>
       <button id="logout-button" disabled>Disconnect</button>
+      <p class="hint" style="margin-top: 10px;">
+        <strong>Note:</strong> After connecting, you'll need to share your Notion database with the integration. 
+        This is done in Notion by opening your database, clicking "Share" in the top-right, and adding your integration.
+      </p>
     </div>
     
     <div id="database-section" class="section" style="display: none;">
@@ -34,6 +38,16 @@
           <option value="">Loading databases...</option>
         </select>
         <button id="refresh-databases-button" class="small-button" title="Refresh database list" disabled>&#x21bb;</button>
+      </div>
+      <div class="important-note" style="margin-top: 10px; padding: 10px; background-color: #fff3e0; border-left: 4px solid #ff9800; border-radius: 4px;">
+        <strong>Important:</strong> You must manually share your database with the integration in Notion:
+        <ol style="margin-top: 5px; margin-bottom: 5px;">
+          <li>Open your database in Notion</li>
+          <li>Click the "Share" button in the top-right corner</li>
+          <li>Hover on "Connections"</li>
+          <li>Search for your connection by name and click on it</li>
+        </ol>
+        <p style="margin-top: 5px; margin-bottom: 0;">Then click "Refresh Databases" button above to see your shared databases.</p>
       </div>
     </div>
     

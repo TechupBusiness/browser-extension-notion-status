@@ -60,12 +60,12 @@ async function init() {
 
 // Check if the URL is in Notion database (handles variations and partial matches)
 async function checkCurrentUrl(url, cacheOnly = false) {
-  if (!url || url.startsWith('chrome://') || url.startsWith('about:')) {
-    // Consider setting a default GRAY state for inactive tabs
-    // await setIconState('GRAY', [], 'Inactive URL');
+  if (!url) {
+    await setIconState('GRAY', [], 'No URL available');
+    await chrome.storage.local.set({ currentTabStatus: { state: 'GRAY', text: 'No URL available' } });
     return;
   }
-
+  
   // --- Lock Check ---
   if (currentlyCheckingUrls.has(url)) {
     console.log(`Already checking URL: ${url}. Skipping duplicate check.`);
@@ -81,6 +81,22 @@ async function checkCurrentUrl(url, cacheOnly = false) {
     if (!config.integrationToken || !config.databaseId || !config.propertyName) {
       setIconState('GRAY');
       await chrome.storage.local.set({ currentTabStatus: { state: 'GRAY', error: 'Extension not configured.' } });
+      return;
+    }
+
+    // --- Check if URL is excluded by domain rules ---
+    const partialMatchingInfo = await shouldDoPartialMatching(url);
+    if (partialMatchingInfo === false) {
+      // URL is excluded by domain rules
+      console.log(`URL excluded by domain rules: ${url}`);
+      await setIconState('GRAY', [], 'URL excluded by domain rules');
+      await chrome.storage.local.set({ 
+        currentTabStatus: { 
+          state: 'GRAY', 
+          text: 'URL excluded by domain rules',
+          domainExcluded: true 
+        } 
+      });
       return;
     }
 
@@ -849,6 +865,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   } else if (message.action === 'checkUrl') {
     if (message.url) {
+      if (message.checkRulesOnly) {
+        // Only check if URL is excluded by domain rules
+        shouldDoPartialMatching(message.url).then(result => {
+          if (result === false) {
+            // URL is excluded by domain rules, update status
+            setIconState('GRAY', [], 'URL excluded by domain rules').then(() => {
+              chrome.storage.local.set({ 
+                currentTabStatus: { 
+                  state: 'GRAY', 
+                  text: 'URL excluded by domain rules',
+                  domainExcluded: true 
+                } 
+              }).then(() => {
+                sendResponse({ success: true, excluded: true });
+              });
+            });
+          } else {
+            // URL is not excluded
+            sendResponse({ success: true, excluded: false });
+          }
+        }).catch(error => {
+          console.error('Error checking rules for URL:', message.url, error);
+          sendResponse({ success: false, error: error.message });
+        });
+        return true; // Indicate async response
+      }
+
       // Use full check (API if needed) when explicitly requested
       checkCurrentUrl(message.url, false).then(() => {
         sendResponse({ success: true });
@@ -925,32 +968,83 @@ async function getDomainExclusionRules() {
 // Check if partial matching should be done for a URL based on domain rules
 async function shouldDoPartialMatching(url) {
   try {
-    // Parse the URL
-    const parsedUrl = new URL(url);
-    const hostname = parsedUrl.hostname;
+    // Extract protocol and domain for special protocol handling
+    let protocol = '';
+    let hostname = '';
+    let domainForCheck = '';
+    
+    // Handle special protocol URLs like chrome:// or about:
+    const protocolMatch = url.match(/^([a-z-]+):(\/\/)?([^\/]*)/i);
+    if (protocolMatch) {
+      protocol = protocolMatch[1].toLowerCase();
+      hostname = protocolMatch[3] || '';
+      
+      // For protocol-based URLs, check if the protocol is in domain rules
+      if (protocol) {
+        // First try to match the protocol itself as a "domain" in the rules
+        domainForCheck = protocol;
+        
+        // Get domain rules to check if this protocol is defined there
+        const domainRules = await getDomainExclusionRules();
+        const matchingProtocolRule = domainRules.find(rule => 
+          rule.domain.toLowerCase() === protocol.toLowerCase()
+        );
+        
+        if (matchingProtocolRule) {
+          // Found a rule for this protocol, use its match level directly
+          console.log(`Protocol ${protocol} matched in domain rules`);
+          if (matchingProtocolRule.matchLevel === 'disabled') {
+            return false; // Disable matching for this protocol
+          }
+          // For other match levels, continue with the protocol as the domain
+          return { matchLevel: matchingProtocolRule.matchLevel, rule: matchingProtocolRule };
+        }
+        
+        // If we get here, no specific rule for the protocol, try normal URL parsing
+        if (protocol === 'http' || protocol === 'https') {
+          try {
+            const parsedUrl = new URL(url);
+            domainForCheck = parsedUrl.hostname;
+          } catch (error) {
+            console.error(`Error parsing URL: ${url}`, error);
+            domainForCheck = hostname || protocol;
+          }
+        }
+      }
+    } else {
+      // Fallback to standard URL parsing
+      try {
+        const parsedUrl = new URL(url);
+        domainForCheck = parsedUrl.hostname;
+      } catch (error) {
+        console.error(`Cannot parse URL: ${url}`, error);
+        return true; // Default to true on error
+      }
+    }
+    
     const domainRules = await getDomainExclusionRules();
     
-    // Find the first matching rule for this hostname
+    // Find the first matching rule for this hostname/protocol
     const matchingRule = domainRules.find(rule => {
-      // Simple case insensitive check if hostname contains the rule's domain
-      // This handles both exact matches and subdomains
-      return hostname.toLowerCase().includes(rule.domain.toLowerCase());
+      // Match exact or check if hostname contains the rule's domain
+      return domainForCheck === rule.domain || 
+             (domainForCheck && domainForCheck.includes(rule.domain));
     });
     
     if (!matchingRule) {
       // No matching rule, do default partial matching
-      console.log(`No domain rule found for ${hostname}, using default partial matching`);
+      console.log(`No domain rule found for ${domainForCheck}, using default partial matching`);
       return true;
     }
     
     // If match level is 'disabled', no partial matching
     if (matchingRule.matchLevel === 'disabled') {
-      console.log(`Partial matching disabled for ${hostname}`);
+      console.log(`Partial matching disabled for ${domainForCheck}`);
       return false;
     }
     
     // If it got here, we need to do partial matching but with custom rules
-    console.log(`Using custom partial matching for ${hostname} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
+    console.log(`Using custom partial matching for ${domainForCheck} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
     return { matchLevel: matchingRule.matchLevel, rule: matchingRule };
     
   } catch (error) {
@@ -1206,8 +1300,7 @@ function generateExactMatchVariations(url) {
   }
   
   // Filter out potentially invalid URLs created (e.g., adding www. to an IP or non-standard TLD)
-  // Basic filter: check for at least one dot
-  const validVariations = Array.from(variations).filter(v => v.includes('.') || v.startsWith('http://localhost')); 
+  const validVariations = Array.from(variations).filter(v => v.includes('.'));
   
   return validVariations.length > 0 ? validVariations : [url]; // Return valid ones or fallback
 } 

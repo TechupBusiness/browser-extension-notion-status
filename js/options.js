@@ -3,6 +3,156 @@ const NOTION_API_URL = 'https://api.notion.com/v1';
 
 // Default domain exclusion rules
 const DEFAULT_DOMAIN_RULES = [
+  // Browser-specific protocol schemes
+  {
+    domain: 'chrome',
+    matchLevel: 'disabled',
+    description: 'Chrome browser internal URLs (chrome://)'
+  },
+  {
+    domain: 'brave',
+    matchLevel: 'disabled',
+    description: 'Brave browser internal URLs (brave://)'
+  },
+  {
+    domain: 'about',
+    matchLevel: 'disabled',
+    description: 'Browser about pages (about:)'
+  },
+  {
+    domain: 'edge',
+    matchLevel: 'disabled',
+    description: 'Edge browser internal URLs (edge://)'
+  },
+  {
+    domain: 'moz-extension',
+    matchLevel: 'disabled',
+    description: 'Firefox extension URLs (moz-extension://)'
+  },
+  {
+    domain: 'firefox',
+    matchLevel: 'disabled',
+    description: 'Firefox internal URLs (firefox:)'
+  },
+  {
+    domain: 'safari',
+    matchLevel: 'disabled',
+    description: 'Safari internal URLs (safari:)'
+  },
+  {
+    domain: 'file',
+    matchLevel: 'disabled',
+    description: 'Local file URLs (file:)'
+  },
+  {
+    domain: 'chrome-extension',
+    matchLevel: 'disabled',
+    description: 'Chrome extension URLs (chrome-extension://)'
+  },
+  {
+    domain: 'view-source',
+    matchLevel: 'disabled',
+    description: 'View source URLs (view-source:)'
+  },
+  // Additional browser-specific protocols
+  {
+    domain: 'opera',
+    matchLevel: 'disabled',
+    description: 'Opera browser internal URLs (opera://)'
+  },
+  {
+    domain: 'vivaldi',
+    matchLevel: 'disabled',
+    description: 'Vivaldi browser internal URLs (vivaldi://)'
+  },
+  {
+    domain: 'edge-extension',
+    matchLevel: 'disabled',
+    description: 'Edge extension URLs (edge-extension://)'
+  },
+  {
+    domain: 'devtools',
+    matchLevel: 'disabled',
+    description: 'Developer tools URLs (devtools://)'
+  },
+  {
+    domain: 'web-extension',
+    matchLevel: 'disabled',
+    description: 'Web extension URLs (web-extension://)'
+  },
+  // Special protocols
+  {
+    domain: 'data',
+    matchLevel: 'disabled',
+    description: 'Data URLs (data:)'
+  },
+  {
+    domain: 'javascript',
+    matchLevel: 'disabled',
+    description: 'JavaScript URLs (javascript:)'
+  },
+  {
+    domain: 'mailto',
+    matchLevel: 'disabled',
+    description: 'Email URLs (mailto:)'
+  },
+  {
+    domain: 'tel',
+    matchLevel: 'disabled',
+    description: 'Telephone URLs (tel:)'
+  },
+  {
+    domain: 'sms',
+    matchLevel: 'disabled',
+    description: 'SMS URLs (sms:)'
+  },
+  {
+    domain: 'blob',
+    matchLevel: 'disabled',
+    description: 'Blob URLs (blob:)'
+  },
+  {
+    domain: 'ws',
+    matchLevel: 'disabled',
+    description: 'WebSocket URLs (ws://)'
+  },
+  {
+    domain: 'wss',
+    matchLevel: 'disabled',
+    description: 'Secure WebSocket URLs (wss://)'
+  },
+  {
+    domain: 'ftp',
+    matchLevel: 'disabled',
+    description: 'FTP URLs (ftp://)'
+  },
+  // Local development domains - these are matched as hostnames, not protocols
+  {
+    domain: 'localhost',
+    matchLevel: 'disabled',
+    description: 'Local development server'
+  },
+  {
+    domain: '127.0.0.1',
+    matchLevel: 'disabled',
+    description: 'Local development IP address'
+  },
+  {
+    domain: '192.168',
+    matchLevel: 'disabled',
+    description: 'Local network IP addresses (192.168.x.x)'
+  },
+  {
+    domain: '10.',
+    matchLevel: 'disabled',
+    description: 'Local network IP addresses (10.x.x.x)'
+  },
+  {
+    domain: '172.',
+    matchLevel: 'disabled',
+    description: 'Local network IP addresses (172.16-31.x.x)'
+  },
+  // Regular domain rules
   {
     domain: 'github.com',
     matchLevel: 'custom',

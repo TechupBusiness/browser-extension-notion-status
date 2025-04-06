@@ -221,6 +221,7 @@ async function updateDatabaseInfo(settings) {
 // Load the status set by the background script and update UI
 async function loadAndDisplayStatus(currentUrl) {
   elements.url.textContent = currentUrl;
+  
   try {
     const { currentTabStatus } = await chrome.storage.local.get('currentTabStatus');
     
@@ -255,9 +256,12 @@ async function loadAndDisplayStatus(currentUrl) {
         break;
       case 'GRAY':
       default:
-        statusText = 'Cannot check this URL or extension is misconfigured.';
+        statusText = currentTabStatus.text || 'Cannot check this URL or extension is misconfigured.';
         if (currentTabStatus.error) {
           statusText = `Error: ${currentTabStatus.error}`;
+        }
+        if (currentTabStatus.domainExcluded) {
+          statusText = 'This URL type is excluded by domain rules.';
         }
         elements.partialMatchesContainer.style.display = 'none'; // Hide list
         break;
@@ -269,7 +273,7 @@ async function loadAndDisplayStatus(currentUrl) {
     // as it's managed by the background script's caching/checking.
     // We could store it alongside currentTabStatus if needed.
     // For now, let's just indicate it's up-to-date.
-    elements.lastChecked.textContent = 'Up to date'; 
+    elements.lastChecked.textContent = currentTabStatus.domainExcluded ? 'N/A' : 'Up to date'; 
 
   } catch (error) {
     console.error('Error loading or displaying status:', error);
@@ -335,6 +339,23 @@ async function handleRefresh() {
   const url = await getCurrentUrl();
   
   try {
+    // First check if this URL is excluded by domain rules
+    // We do this by asking the background script to check the URL without clearing cache
+    await chrome.runtime.sendMessage({ action: 'checkUrl', url: url, checkRulesOnly: true });
+    
+    // Wait a short moment for the background script to update status
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Get the current status to see if it's excluded
+    const { currentTabStatus } = await chrome.storage.local.get('currentTabStatus');
+    
+    if (currentTabStatus && currentTabStatus.domainExcluded) {
+      // This URL is excluded by domain rules, don't proceed with refresh
+      updateStatusUI('gray', 'This URL type is excluded by domain rules');
+      elements.lastChecked.textContent = 'N/A';
+      return;
+    }
+    
     // Clear cache for this URL in background script
     await chrome.runtime.sendMessage({ action: 'clearCacheForUrl', url: url });
     
