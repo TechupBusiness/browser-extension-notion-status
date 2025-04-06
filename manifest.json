@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Notion Status",
+  "name": "Notion URL Status",
   "version": "1.0",
-  "description": "Check if the current URL is stored in your Notion database",
+  "description": "Check if the current URL is stored in your Notion database and show the status of the URL in the extension icon.",
   "action": {
     "default_icon": {
       "16": "icons/png/gray_n_16.png",
@@ -10,7 +10,7 @@
       "48": "icons/png/gray_n_48.png",
       "128": "icons/png/gray_n_128.png"
     },
-    "default_title": "Notion Status",
+    "default_title": "Notion URL Status",
     "default_popup": "popup.html"
   },
   "options_ui": {
@@ -31,10 +31,5 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.notion.com;"
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "notion-status@example.com"
-    }
   }
-} 
+}
