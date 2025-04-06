@@ -79,6 +79,56 @@ The extension provides two ways to sync with your Notion database:
 
 2. **Full Sync** (Manual): You can trigger a complete sync from the options page using the "Force Full Sync" button. This is useful for initial setup or if you suspect the cache is out of sync.
 
+## Domain Exclusion Rules & Custom Patterns
+
+The extension allows you to customize how "similar" URLs are detected through domain rules:
+
+### Pattern Syntax
+
+When using custom patterns, you can use the following special characters:
+
+- `*` - Matches any single path segment
+- `**` - Matches multiple path segments (all remaining segments)
+- Query parameters can use wildcards too with `param=*`
+
+### Examples:
+
+- **GitHub repositories**: `/*/repo*` matches any user's repo (github.com/username/reponame)
+- **YouTube videos**: `/watch?v=*` matches any video ID
+- **Reddit threads**: `/r/*/comments/*/*` matches threads in any subreddit
+- **Stack Overflow**: `/questions/*` matches any question ID
+
+### How It Works
+
+The pattern system breaks down a URL into path segments and query parameters:
+
+1. Path segments are compared one-by-one with the pattern
+2. Wildcards are replaced with the actual content from the URL
+3. For query parameters, you can specify exact matches or use wildcards
+4. The system generates an "ancestor URL" based on your pattern
+
+For example, with a GitHub URL like `github.com/user1/repo1/issues/123`:
+- Pattern `/*/repo*` would match and create `github.com/user1/repo1` as the ancestor URL
+- Pattern `/user1/**` would match and create `github.com/user1` as the ancestor URL
+
+This gives you precise control over which URLs should be considered "similar" for the orange icon state.
+
+### Default Patterns
+
+The extension comes with pre-configured patterns for common websites:
+
+| Website | Pattern | Match Level |
+|---------|---------|------------|
+| GitHub | `/*/repo*` | Repository level |
+| GitLab | `/*/project*` | Repository level |
+| Reddit | `/r/*/comments/*/*` | Thread level |
+| Twitter/X | `/*` | Profile level |
+| YouTube | `/watch?v=*` | Video level |
+| Stack Overflow | `/questions/*` | Question level |
+| LinkedIn | `/in/*` | Profile level |
+| Amazon | `/dp/*` | Product level |
+| Medium | `/@*/*` | Article level |
+
 ## Note About Notion API
 
 This extension uses Notion's official API with an Integration Token. The Integration Token does not expire unless you manually revoke it from your Notion settings.

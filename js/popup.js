@@ -240,7 +240,11 @@ async function loadAndDisplayStatus(currentUrl) {
         elements.partialMatchesContainer.style.display = 'none'; // Hide list
         break;
       case 'RED':
-        statusText = 'This URL is not in your Notion database.';
+        if (currentTabStatus.domainExcluded) {
+          statusText = 'This URL is not in your database. Partial matching disabled by domain rule.';
+        } else {
+          statusText = 'This URL is not in your Notion database.';
+        }
         elements.partialMatchesContainer.style.display = 'none'; // Hide list
         break;
       case 'ORANGE':

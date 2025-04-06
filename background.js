@@ -240,13 +240,37 @@ async function checkCurrentUrl(url, cacheOnly = false) {
 }
 
 async function checkPartialAndAncestorMatches(originalUrl, config) {
+    const partialMatchingInfo = await shouldDoPartialMatching(originalUrl);
+    if (partialMatchingInfo === false) {
+        // Partial matching is disabled for this domain
+        console.log("Partial matching disabled for this domain. Setting RED state.");
+        setIconState('RED', [], null, true); // Set domainExcluded flag to true
+        return;
+    }
+    
     const checkedApiForAncestors = new Set(); // Track ancestors checked in *this* phase
     let foundPartialMatch = false;
     let partialMatchingUrls = new Set();
 
     // --- 4a. Check Ancestor Paths ---
-    const ancestors = generateAncestorUrls(originalUrl);
-    console.log("Checking Ancestors:", ancestors);
+    let ancestors = [];
+    
+    if (typeof partialMatchingInfo === 'object') {
+        // Use custom ancestor generation based on match level
+        ancestors = await generateCustomAncestorUrls(originalUrl, partialMatchingInfo);
+        console.log("Using custom ancestor generation:", ancestors);
+    } else {
+        // Use default ancestor generation
+        ancestors = generateAncestorUrls(originalUrl);
+        console.log("Using default ancestor generation:", ancestors);
+    }
+    
+    if (ancestors.length === 0) {
+        console.log("No ancestors to check, setting RED state");
+        setIconState('RED');
+        return;
+    }
+    
     const ancestorsToCheckApi = [];
     const ancestorCachePromises = ancestors.map(a => checkCache(a, config.cacheDuration));
     const ancestorCacheResults = await Promise.all(ancestorCachePromises);
@@ -301,32 +325,43 @@ async function checkPartialAndAncestorMatches(originalUrl, config) {
     }
 
     // --- 4b. Check for Neighboring Pages (Original Partial Check) ---
+    // Only do neighbor matching if it's enabled for this domain
     let neighborMatches = [];
-    try {
-        const parsedUrl = new URL(originalUrl);
-        // Use a less specific prefix for broader neighbor search? Or keep as is? Let's keep parent path.
-        const parentPathPrefix = parsedUrl.pathname.length > 1 ? 
-                             `${parsedUrl.protocol}//${parsedUrl.hostname}${parsedUrl.pathname.substring(0, parsedUrl.pathname.lastIndexOf('/') + 1)}` :
-                             `${parsedUrl.protocol}//${parsedUrl.hostname}/`;
+    
+    // Skip neighbor matching for custom match levels unless it's set to domain
+    const shouldDoNeighborMatching = typeof partialMatchingInfo !== 'object' || 
+                                   partialMatchingInfo.matchLevel === 'domain' || 
+                                   partialMatchingInfo.matchLevel === 'subdomain';
+    
+    if (shouldDoNeighborMatching) {
+        try {
+            const parsedUrl = new URL(originalUrl);
+            // Use a less specific prefix for broader neighbor search? Or keep as is? Let's keep parent path.
+            const parentPathPrefix = parsedUrl.pathname.length > 1 ? 
+                                `${parsedUrl.protocol}//${parsedUrl.hostname}${parsedUrl.pathname.substring(0, parsedUrl.pathname.lastIndexOf('/') + 1)}` :
+                                `${parsedUrl.protocol}//${parsedUrl.hostname}/`;
 
-        console.log(`Checking for neighboring pages with prefix: ${parentPathPrefix}`);
-        // This still uses a separate API call, could potentially be combined if API supported complex filters like (OR exact_matches) OR (starts_with neighbor_prefix)
-        // But let's keep it separate for now.
-        neighborMatches = await queryNotionForPartialUrl(parentPathPrefix, config); 
+            console.log(`Checking for neighboring pages with prefix: ${parentPathPrefix}`);
+            // This still uses a separate API call, could potentially be combined if API supported complex filters like (OR exact_matches) OR (starts_with neighbor_prefix)
+            // But let's keep it separate for now.
+            neighborMatches = await queryNotionForPartialUrl(parentPathPrefix, config); 
 
-    } catch (urlError) {
-        console.error("Error parsing URL for neighbor match:", urlError);
-    }
-
-    if (neighborMatches.length > 0) {
-        // Extract canonical URLs from neighbor results
-        const neighborUrls = neighborMatches.map(page => page.properties[config.propertyName]?.url).filter(Boolean);
-        if (neighborUrls.length > 0) {
-            console.log(`Found ${neighborUrls.length} neighboring pages.`);
-            foundPartialMatch = true;
-            neighborUrls.forEach(u => partialMatchingUrls.add(u));
-            // Optionally cache these neighbors? Could lead to large cache.
+        } catch (urlError) {
+            console.error("Error parsing URL for neighbor match:", urlError);
         }
+
+        if (neighborMatches.length > 0) {
+            // Extract canonical URLs from neighbor results
+            const neighborUrls = neighborMatches.map(page => page.properties[config.propertyName]?.url).filter(Boolean);
+            if (neighborUrls.length > 0) {
+                console.log(`Found ${neighborUrls.length} neighboring pages.`);
+                foundPartialMatch = true;
+                neighborUrls.forEach(u => partialMatchingUrls.add(u));
+                // Optionally cache these neighbors? Could lead to large cache.
+            }
+        }
+    } else {
+        console.log("Skipping neighbor matching due to domain rule settings");
     }
 
     // --- 5. Set Final State (ORANGE or RED) ---
@@ -520,7 +555,7 @@ async function queryNotionForPartialUrl(urlPrefix, config) {
 }
 
 // Set the icon and store the current status
-async function setIconState(state, matchingUrls = [], statusText = null) {
+async function setIconState(state, matchingUrls = [], statusText = null, domainExcluded = false) {
   try {
     await chrome.action.setIcon({ path: ICON_STATES[state] });
     const statusToStore = { state };
@@ -531,6 +566,9 @@ async function setIconState(state, matchingUrls = [], statusText = null) {
       statusToStore.text = statusText || 'URL found in Notion.';
     } else if (state === 'RED') {
        statusToStore.text = statusText || 'URL not found in Notion.';
+       if (domainExcluded) {
+         statusToStore.domainExcluded = true;
+       }
     } else if (state === 'GRAY') {
        statusToStore.text = statusText || 'Checking status or extension inactive/misconfigured.';
        if (statusText && statusText.includes('Error')) { // Store error message if provided
@@ -878,6 +916,249 @@ async function clearCacheForUrl(url) {
   }
 }
 
+// Get domain exclusion rules from settings
+async function getDomainExclusionRules() {
+  const { domainRules = [] } = await chrome.storage.local.get('domainRules');
+  return domainRules;
+}
+
+// Check if partial matching should be done for a URL based on domain rules
+async function shouldDoPartialMatching(url) {
+  try {
+    // Parse the URL
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname;
+    const domainRules = await getDomainExclusionRules();
+    
+    // Find the first matching rule for this hostname
+    const matchingRule = domainRules.find(rule => {
+      // Simple case insensitive check if hostname contains the rule's domain
+      // This handles both exact matches and subdomains
+      return hostname.toLowerCase().includes(rule.domain.toLowerCase());
+    });
+    
+    if (!matchingRule) {
+      // No matching rule, do default partial matching
+      console.log(`No domain rule found for ${hostname}, using default partial matching`);
+      return true;
+    }
+    
+    // If match level is 'disabled', no partial matching
+    if (matchingRule.matchLevel === 'disabled') {
+      console.log(`Partial matching disabled for ${hostname}`);
+      return false;
+    }
+    
+    // If it got here, we need to do partial matching but with custom rules
+    console.log(`Using custom partial matching for ${hostname} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
+    return { matchLevel: matchingRule.matchLevel, rule: matchingRule };
+    
+  } catch (error) {
+    console.error(`Error checking domain rules for ${url}:`, error);
+    return true; // Default to true on error
+  }
+}
+
+// Generate ancestor URLs for a given URL based on domain rules
+function generateAncestorUrls(url) {
+    const ancestors = [];
+    try {
+        const parsed = new URL(url);
+        const pathSegments = parsed.pathname.split('/').filter(Boolean); // Split path and remove empty segments
+        
+        // Iterate from the full path down to the root
+        for (let i = pathSegments.length - 1; i >= 0; i--) {
+            const ancestorPath = '/' + pathSegments.slice(0, i).join('/');
+            // Combine protocol, hostname, and ancestor path
+            // We only care about path ancestors, not just the hostname itself usually
+            if (ancestorPath !== '/' || pathSegments.length > 1) { // Avoid adding domain root if path was only one level deep
+                 ancestors.push(`${parsed.protocol}//${parsed.hostname}${ancestorPath}`);
+            }
+        }
+        // Optionally add the root domain if path existed
+        if (pathSegments.length > 0) {
+             ancestors.push(`${parsed.protocol}//${parsed.hostname}`);
+        }
+
+    } catch (e) {
+        console.error("Error generating ancestor URLs for:", url, e);
+    }
+    return ancestors;
+}
+
+// New function to generate ancestor URLs based on domain rule match level
+async function generateCustomAncestorUrls(url, matchingInfo) {
+  const { matchLevel, rule } = matchingInfo;
+  if (!matchLevel || matchLevel === 'disabled') {
+    return []; // No ancestors if matching is disabled
+  }
+  
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname;
+    const pathSegments = parsed.pathname.split('/').filter(Boolean);
+    const ancestors = [];
+    
+    // Handle custom pattern matching
+    if (matchLevel === 'custom' && rule.pattern) {
+      return generateUrlFromCustomPattern(parsed, rule.pattern);
+    }
+    
+    // Determine how many path segments to keep based on match level
+    let pathSegmentsToKeep = 0;
+    
+    switch (matchLevel) {
+      case 'domain':
+        // Only match the domain, no path segments
+        ancestors.push(`${parsed.protocol}//${hostname}`);
+        return ancestors;
+        
+      case 'path1':
+        // Match first path segment
+        pathSegmentsToKeep = 1;
+        break;
+        
+      case 'path2':
+        // Match two path segments
+        pathSegmentsToKeep = 2;
+        break;
+        
+      case 'path3':
+        // Match three path segments
+        pathSegmentsToKeep = 3;
+        break;
+        
+      default:
+        // Default case - just consider full path
+        console.log(`Unknown match level ${matchLevel}, using default ancestor generation`);
+        return generateAncestorUrls(url);
+    }
+    
+    // Generate ancestor with specified path segments
+    if (pathSegmentsToKeep > 0 && pathSegments.length >= pathSegmentsToKeep) {
+      const ancestorPath = '/' + pathSegments.slice(0, pathSegmentsToKeep).join('/');
+      ancestors.push(`${parsed.protocol}//${hostname}${ancestorPath}`);
+    } else {
+      // Fallback to domain-only if we couldn't determine path segments
+      ancestors.push(`${parsed.protocol}//${hostname}`);
+    }
+    
+    return ancestors;
+    
+  } catch (error) {
+    console.error(`Error generating custom ancestors for ${url}:`, error);
+    return generateAncestorUrls(url); // Fall back to default method on error
+  }
+}
+
+// Function to generate URL from custom pattern
+function generateUrlFromCustomPattern(parsedUrl, pattern) {
+  try {
+    const hostname = parsedUrl.hostname;
+    const protocol = parsedUrl.protocol;
+    const urlAncestors = [];
+    
+    // If pattern is empty, use domain only
+    if (!pattern) {
+      urlAncestors.push(`${protocol}//${hostname}`);
+      return urlAncestors;
+    }
+    
+    // Check if pattern contains query parameters
+    let pathPattern = pattern;
+    let queryPattern = '';
+    
+    if (pattern.includes('?')) {
+      [pathPattern, queryPattern] = pattern.split('?');
+    }
+    
+    // Split path segments
+    const patternSegments = pathPattern.split('/').filter(Boolean);
+    const urlPathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+    
+    // Create path based on pattern
+    let resultPath = '';
+    let allSegmentsMatched = true;
+    
+    if (patternSegments.length > 0) {
+      // Build the path based on the pattern
+      const resultSegments = [];
+      
+      for (let i = 0; i < patternSegments.length; i++) {
+        const patternSegment = patternSegments[i];
+        
+        if (patternSegment === '*') {
+          // Wildcard - use the actual URL segment if available
+          if (i < urlPathSegments.length) {
+            resultSegments.push(urlPathSegments[i]);
+          } else {
+            allSegmentsMatched = false;
+            break; // Not enough segments in actual URL
+          }
+        } else if (patternSegment === '**') {
+          // Multi-segment wildcard - grab all remaining segments
+          resultSegments.push(...urlPathSegments.slice(i));
+          break;
+        } else {
+          // Literal segment - keep as is
+          resultSegments.push(patternSegment);
+        }
+      }
+      
+      resultPath = '/' + resultSegments.join('/');
+    }
+    
+    // Handle query parameters
+    let resultQuery = '';
+    if (queryPattern) {
+      // Check if the query pattern contains wildcards
+      if (queryPattern.includes('*')) {
+        // Query has wildcards - need to replace with actual values
+        const queryParams = new URLSearchParams(parsedUrl.search);
+        const patternParams = queryPattern.split('&');
+        
+        const resultParams = [];
+        
+        for (const paramPattern of patternParams) {
+          if (paramPattern.includes('=')) {
+            let [paramName, paramValue] = paramPattern.split('=');
+            
+            if (paramValue === '*' && queryParams.has(paramName)) {
+              // Use the actual value from the URL
+              resultParams.push(`${paramName}=${queryParams.get(paramName)}`);
+            } else {
+              // Use the literal value from the pattern
+              resultParams.push(paramPattern);
+            }
+          } else {
+            // Just a parameter name without value
+            resultParams.push(paramPattern);
+          }
+        }
+        
+        resultQuery = resultParams.join('&');
+      } else {
+        // No wildcards - use the query string as is
+        resultQuery = queryPattern;
+      }
+    }
+    
+    // Combine everything
+    const ancestorUrl = `${protocol}//${hostname}${resultPath}${resultQuery ? '?' + resultQuery : ''}`;
+    urlAncestors.push(ancestorUrl);
+    
+    // Also add the domain-only as a fallback
+    if (resultPath !== '/' || resultQuery) {
+      urlAncestors.push(`${protocol}//${hostname}`);
+    }
+    
+    return urlAncestors;
+  } catch (error) {
+    console.error(`Error generating URL from pattern for ${parsedUrl.href}:`, error);
+    return [`${parsedUrl.protocol}//${parsedUrl.hostname}`]; // Fallback to domain only on error
+  }
+}
+
 // Generate potential exact match variations for a given URL
 function generateExactMatchVariations(url) {
   const variations = new Set();
@@ -929,31 +1210,4 @@ function generateExactMatchVariations(url) {
   const validVariations = Array.from(variations).filter(v => v.includes('.') || v.startsWith('http://localhost')); 
   
   return validVariations.length > 0 ? validVariations : [url]; // Return valid ones or fallback
-}
-
-// Generate ancestor URLs for a given URL (e.g., https://a.com/b/c -> [https://a.com/b, https://a.com])
-function generateAncestorUrls(url) {
-    const ancestors = [];
-    try {
-        const parsed = new URL(url);
-        const pathSegments = parsed.pathname.split('/').filter(Boolean); // Split path and remove empty segments
-        
-        // Iterate from the full path down to the root
-        for (let i = pathSegments.length - 1; i >= 0; i--) {
-            const ancestorPath = '/' + pathSegments.slice(0, i).join('/');
-            // Combine protocol, hostname, and ancestor path
-            // We only care about path ancestors, not just the hostname itself usually
-            if (ancestorPath !== '/' || pathSegments.length > 1) { // Avoid adding domain root if path was only one level deep
-                 ancestors.push(`${parsed.protocol}//${parsed.hostname}${ancestorPath}`);
-            }
-        }
-        // Optionally add the root domain if path existed
-        if (pathSegments.length > 0) {
-             ancestors.push(`${parsed.protocol}//${parsed.hostname}`);
-        }
-
-    } catch (e) {
-        console.error("Error generating ancestor URLs for:", url, e);
-    }
-    return ancestors;
 } 

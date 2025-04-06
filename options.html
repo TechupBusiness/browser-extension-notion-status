@@ -68,6 +68,20 @@
       <small class="hint sync-hint">Manually fetch all URLs from the selected Notion database. Use this for initial setup or if sync seems broken.</small>
     </div>
     
+    <div id="domain-exclusion-section" class="section">
+      <h2>Domain Exclusion Settings</h2>
+      <p class="hint">Specify domains where the similarity check (orange icon) should be disabled or customized.</p>
+      
+      <div id="domain-exclusion-list">
+        <!-- Domain exclusion entries will be added here -->
+      </div>
+      
+      <div class="actions" style="margin-top: 15px;">
+        <button id="add-domain-rule-button" type="button">Add Domain Rule</button>
+        <button id="reset-default-domains-button" type="button">Reset to Defaults</button>
+      </div>
+    </div>
+    
     <div id="status-message" class="status"></div>
     
     <div class="actions">

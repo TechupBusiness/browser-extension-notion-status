@@ -202,4 +202,65 @@ a:hover {
 
 .oauth-only, .token-only {
   transition: opacity 0.3s, height 0.3s, transform 0.3s;
+}
+
+/* Domain exclusion styles */
+.domain-rule {
+  border: 1px solid #e5e9f0;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background-color: #f9fafb;
+}
+
+.domain-rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.domain-rule-title {
+  font-weight: bold;
+}
+
+.domain-rule-action {
+  display: flex;
+  gap: 8px;
+}
+
+.domain-rule-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.domain-rule input, .domain-rule select {
+  width: 100%;
+}
+
+.domain-rule-description {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+#add-domain-rule-button {
+  background-color: #5e81ac;
+}
+
+#reset-default-domains-button {
+  background-color: #d08770;
+}
+
+.remove-domain-button {
+  background-color: #bf616a;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.move-domain-button {
+  background-color: #4c566a;
+  padding: 4px 8px;
+  font-size: 12px;
 } 
