@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Notion Status",
+  "version": "1.0",
+  "description": "Check if the current URL is stored in your Notion database",
+  "action": {
+    "default_icon": {
+      "16": "icons/png/gray_n_16.png",
+      "32": "icons/png/gray_n_32.png",
+      "48": "icons/png/gray_n_48.png",
+      "128": "icons/png/gray_n_128.png"
+    },
+    "default_title": "Notion Status",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "identity",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.notion.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.notion.com;"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "notion-status@example.com"
+    }
+  }
+} 

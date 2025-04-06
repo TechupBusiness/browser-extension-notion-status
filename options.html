@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Notion Status Options</title>
+  <link rel="stylesheet" href="css/options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Notion Status Settings</h1>
+    
+    <div id="token-section" class="section">
+      <h2>Notion Integration Token</h2>
+      <p class="hint">
+        Create an Internal Integration at <a href="https://www.notion.so/my-integrations" target="_blank">https://www.notion.so/my-integrations</a> and enter your secret below.
+      </p>
+      <div class="input-group">
+        <label for="integration-token">Integration Token:</label>
+        <input type="password" id="integration-token" placeholder="Enter your Notion integration token">
+      </div>
+    </div>
+    
+    <div id="login-section" class="section">
+      <h2>Notion Authentication</h2>
+      <div id="auth-status">Not logged in</div>
+      <button id="login-button">Connect to Notion</button>
+      <button id="logout-button" disabled>Disconnect</button>
+    </div>
+    
+    <div id="database-section" class="section" style="display: none;">
+      <h2>Select Database</h2>
+      <div class="input-group database-group">
+        <select id="database-select" disabled>
+          <option value="">Loading databases...</option>
+        </select>
+        <button id="refresh-databases-button" class="small-button" title="Refresh database list" disabled>&#x21bb;</button>
+      </div>
+    </div>
+    
+    <div id="property-section" class="section" style="display: none;">
+      <h2>Select URL Property</h2>
+      <select id="property-select" disabled>
+        <option value="">Select a database first</option>
+      </select>
+    </div>
+
+    <div id="last-edited-property-section" class="section" style="display: none;">
+      <h2>Select Last Edited Time Property</h2>
+      <select id="last-edited-property-select" disabled>
+        <option value="">Select a database first</option>
+      </select>
+      <small class="hint">Select the property in your database that tracks the last edited time (must be 'Last Edited Time' type). This enables efficient delta syncing.</small>
+    </div>
+    
+    <div id="cache-section" class="section">
+      <h2>Cache Settings</h2>
+      <div class="input-group">
+        <label for="cache-duration">Cache Duration:</label>
+        <input type="number" id="cache-duration" min="1" value="60">
+        <select id="cache-duration-unit">
+          <option value="1">Minutes</option>
+          <option value="60">Hours</option>
+          <option value="1440">Days</option>
+        </select>
+      </div>
+      <button id="clear-cache-button">Clear Cache</button>
+      <button type="button" id="force-full-sync-button" class="button" disabled>Force Full Sync</button>
+      <small class="hint sync-hint">Manually fetch all URLs from the selected Notion database. Use this for initial setup or if sync seems broken.</small>
+    </div>
+    
+    <div id="status-message" class="status"></div>
+    
+    <div class="actions">
+      <button id="save-button">Save Settings</button>
+    </div>
+  </div>
+  <script src="js/options.js"></script>
+</body>
+</html> 

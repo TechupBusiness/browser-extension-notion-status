@@ -1,0 +1,205 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.5;
+  color: #333;
+  margin: 0;
+  padding: 20px;
+  background-color: #f7f7f7;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+}
+
+h1 {
+  margin-top: 0;
+  color: #2e3440;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+h2 {
+  font-size: 18px;
+  margin-bottom: 12px;
+  color: #2e3440;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+select, input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+input[type="password"] {
+  font-family: monospace;
+}
+
+input[readonly] {
+  background-color: #f5f5f5;
+  cursor: default;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.input-group label {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.input-group input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.input-group select {
+  width: 100px;
+  margin-bottom: 0;
+}
+
+.input-group .small-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+  width: auto;
+}
+
+.radio-group {
+  margin-bottom: 12px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.radio-group label {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+
+.radio-group input[type="radio"] {
+  margin-right: 8px;
+  width: auto;
+}
+
+button {
+  background-color: #4c566a;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #3b4252;
+}
+
+button:disabled {
+  background-color: #d8dee9;
+  cursor: not-allowed;
+}
+
+button#login-button {
+  background-color: #5e81ac;
+}
+
+button#login-button:hover {
+  background-color: #4c6f94;
+}
+
+button#clear-cache-button {
+  background-color: #bf616a;
+}
+
+button#clear-cache-button:hover {
+  background-color: #a3535d;
+}
+
+.actions {
+  margin-top: 24px;
+  border-top: 1px solid #eee;
+  padding-top: 16px;
+  text-align: right;
+}
+
+#save-button {
+  background-color: #a3be8c;
+}
+
+#save-button:hover {
+  background-color: #8fbA77;
+}
+
+.status {
+  font-size: 14px;
+  padding: 10px;
+  border-radius: 4px;
+  margin-top: 12px;
+  display: none;
+}
+
+.success {
+  background-color: #ebf7eb;
+  color: #2b7d2b;
+  border: 1px solid #d3edd3;
+  display: block;
+}
+
+.error {
+  background-color: #f9ebeb;
+  color: #c53030;
+  border: 1px solid #f2d6d6;
+  display: block;
+}
+
+#auth-status {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #666;
+}
+
+.hint {
+  font-size: 14px;
+  color: #666;
+  font-style: italic;
+  margin-bottom: 16px;
+}
+
+a {
+  color: #5e81ac;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.oauth-only, .token-only {
+  transition: opacity 0.3s, height 0.3s, transform 0.3s;
+} 

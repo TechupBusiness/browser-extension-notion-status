@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Notion Status</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      width: 300px;
+      padding: 15px;
+      margin: 0;
+    }
+    
+    h1 {
+      font-size: 18px;
+      margin-top: 0;
+      color: #2e3440;
+    }
+    
+    .status-card {
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+    }
+    
+    .status-card.green {
+      background-color: #ebf7eb;
+      border: 1px solid #d3edd3;
+    }
+    
+    .status-card.red {
+      background-color: #f9ebeb;
+      border: 1px solid #f2d6d6;
+    }
+    
+    .status-card.gray {
+      background-color: #f2f2f2;
+      border: 1px solid #e5e5e5;
+    }
+    
+    .status-card.orange { /* Style for partial match */
+      background-color: #fff3e0;
+      border: 1px solid #ffe0b2;
+    }
+    
+    .status-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      margin-right: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+    }
+    
+    .status-icon.green {
+      background-color: #2b7d2b;
+    }
+    
+    .status-icon.red {
+      background-color: #c53030;
+    }
+    
+    .status-icon.gray {
+      background-color: #888;
+    }
+    
+    .status-icon.orange { /* Icon style for partial match */
+      background-color: #ff9800;
+    }
+    
+    .status-text {
+      font-size: 14px;
+    }
+    
+    .url {
+      word-break: break-all;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 15px;
+    }
+    
+    .info {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 15px;
+    }
+    
+    button {
+      background-color: #4c566a;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background-color 0.2s;
+    }
+    
+    button:hover {
+      background-color: #3b4252;
+    }
+    
+    button#options-button {
+      background-color: #5e81ac;
+    }
+    
+    button#options-button:hover {
+      background-color: #4c6f94;
+    }
+    
+    .not-configured {
+      text-align: center;
+      padding: 20px 0;
+    }
+    
+    ol {
+      text-align: left;
+      font-size: 12px;
+      padding-left: 20px;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Notion Status</h1>
+  
+  <div id="status-container">
+    <div id="loading">Loading status...</div>
+    
+    <div id="configured-view" style="display: none;">
+      <div id="status-card" class="status-card">
+        <div id="status-icon" class="status-icon">N</div>
+        <div id="status-text" class="status-text">Checking URL...</div>
+      </div>
+      
+      <div id="url" class="url"></div>
+      
+      <div class="info">
+        <div id="database-info">Database: <span id="database-name">Loading...</span></div>
+        <div id="property-info">Property: <span id="property-name">Loading...</span></div>
+        <div id="cache-info">Last checked: <span id="last-checked">Now</span></div>
+      </div>
+      
+      <!-- Container for partial match URLs (hidden by default) -->
+      <div id="partial-matches-container" style="display: none; margin-top: 10px;">
+        <p style="font-size: 12px; margin-bottom: 5px; color: #666;">URLs found under this domain/path:</p>
+        <ul id="partial-matches-list" style="font-size: 11px; padding-left: 18px; margin: 0; max-height: 100px; overflow-y: auto;">
+          <!-- List items will be added here by JS -->
+        </ul>
+      </div>
+
+      <div class="actions">
+        <button id="refresh-button">Check Now</button>
+        <button id="options-button">Options</button>
+      </div>
+    </div>
+    
+    <div id="not-configured-view" style="display: none;" class="not-configured">
+      <p>Notion Status needs to be configured before use.</p>
+      <ol>
+        <li>Create a Notion integration at <strong>notion.so/my-integrations</strong></li>
+        <li>Copy your client ID and client secret</li>
+        <li>Enter them in the extension options</li>
+        <li>Connect to Notion and select your database</li>
+      </ol>
+      <button id="setup-button">Open Settings</button>
+    </div>
+  </div>
+  
+  <script src="js/popup.js"></script>
+</body>
+</html> 
