@@ -226,74 +226,71 @@ async function loadAndDisplayStatus(currentUrl) {
     const { currentTabStatus } = await chrome.storage.local.get('currentTabStatus');
     
     if (!currentTabStatus) {
-      // Should not happen if background script is working, but handle gracefully
       console.warn('Could not retrieve currentTabStatus from storage.');
-      updateStatusUI('gray', 'Status unavailable'); // Use lowercase state
+      updateStatusUI('GRAY', 'Status unavailable');
       elements.lastChecked.textContent = 'Unknown';
       return;
     }
+    
+    const { state, text, matchingUrls, timestamp, domainExcluded, error } = currentTabStatus;
+    let statusText = text || 'Status unavailable'; // Use text from storage if available
+    let iconState = state || 'GRAY';
 
-    // Update UI based on the state
-    let statusText = '';
-    switch (currentTabStatus.state) {
-      case 'GREEN':
-        statusText = 'This URL is in your Notion database.';
-        elements.partialMatchesContainer.style.display = 'none'; // Hide list
-        break;
-      case 'RED':
-        if (currentTabStatus.domainExcluded) {
-          statusText = 'This URL is not in your database. Partial matching disabled by domain rule.';
-        } else {
-          statusText = 'This URL is not in your Notion database.';
-        }
-        elements.partialMatchesContainer.style.display = 'none'; // Hide list
-        break;
-      case 'ORANGE':
-        const count = currentTabStatus.matchingUrls?.length || 0;
-        statusText = `Found ${count} similar URLs in Notion:`;
-        updatePartialMatchesList(currentTabStatus.matchingUrls || []);
-        elements.partialMatchesContainer.style.display = 'block'; // Show list
-        break;
-      case 'GRAY':
-      default:
-        statusText = currentTabStatus.text || 'Cannot check this URL or extension is misconfigured.';
-        if (currentTabStatus.error) {
-          statusText = `Error: ${currentTabStatus.error}`;
-        }
-        if (currentTabStatus.domainExcluded) {
-          statusText = 'This URL type is excluded by domain rules.';
-        }
-        elements.partialMatchesContainer.style.display = 'none'; // Hide list
-        break;
+    // Clear partial matches list initially
+    elements.partialMatchesContainer.style.display = 'none';
+    elements.partialMatchesList.innerHTML = '';
+
+    // Override text/state based on conditions if needed
+    if (iconState === 'GRAY' && error) {
+      statusText = `Error: ${error}`;
+    } else if (iconState === 'ORANGE' && matchingUrls && matchingUrls.length > 0) {
+      statusText = `Found ${matchingUrls.length} similar URLs in Notion:`;
+      updatePartialMatchesList(matchingUrls);
+      elements.partialMatchesContainer.style.display = 'block';
+    } else if (iconState === 'RED' && domainExcluded) {
+      statusText = 'This URL type is excluded by domain rules.';
+    } else if (iconState === 'RED' && !domainExcluded) {
+      statusText = 'This URL is not in your Notion database.';
+    } else if (iconState === 'GREEN') {
+      statusText = 'This URL is in your Notion database.';
     }
-    
-    updateStatusUI(currentTabStatus.state.toLowerCase(), statusText);
-    
-    // We might not have a precise last checked time here easily,
-    // as it's managed by the background script's caching/checking.
-    // We could store it alongside currentTabStatus if needed.
-    // For now, let's just indicate it's up-to-date.
-    elements.lastChecked.textContent = currentTabStatus.domainExcluded ? 'N/A' : 'Up to date'; 
 
-  } catch (error) {
-    console.error('Error loading or displaying status:', error);
-    updateStatusUI('gray', 'Error loading status');
+    updateStatusUI(iconState, statusText); 
+
+    // Update last checked time
+    if (timestamp) {
+        const timeAgo = formatTimeAgo(timestamp);
+        elements.lastChecked.textContent = domainExcluded ? 'N/A (Excluded)' : timeAgo;
+    } else {
+        elements.lastChecked.textContent = domainExcluded ? 'N/A (Excluded)' : 'Unknown';
+    }
+
+  } catch (err) { // Use different variable name to avoid conflict
+    console.error('Error loading or displaying status:', err);
+    updateStatusUI('GRAY', 'Error loading status');
     elements.lastChecked.textContent = 'Error';
   }
 }
 
 // Update the status UI elements
 function updateStatusUI(state, text) {
+  const safeState = state?.toLowerCase() || 'gray'; // Ensure state is lowercase and defaults to gray
+  
   // Reset classes and hide partial matches
   elements.statusCard.className = 'status-card'; // Reset classes
   elements.statusIcon.className = 'status-icon'; // Reset classes
-  elements.statusIcon.removeEventListener('click', togglePartialMatches);
+  elements.statusIcon.removeEventListener('click', togglePartialMatches); // Might re-add later if needed for ORANGE
 
   // Apply new state
-  elements.statusCard.classList.add(state); // e.g., 'green', 'red', 'orange', 'gray'
-  elements.statusIcon.classList.add(state);
-  elements.statusIcon.textContent = state === 'gray' ? '!' : 'N'; // Icon text
+  elements.statusCard.classList.add(safeState); // e.g., 'green', 'red', 'orange', 'gray'
+  elements.statusIcon.classList.add(safeState);
+  elements.statusIcon.textContent = safeState === 'gray' ? '!' : (safeState === 'orange' ? '~~' : 'N'); // Use different icons
   elements.statusText.textContent = text;
+
+  // Re-add click listener for ORANGE state to toggle list (if desired)
+  // if (safeState === 'orange') {
+  //   elements.statusIcon.addEventListener('click', togglePartialMatches);
+  // }
 }
 
 // Populate the list of partially matching URLs
@@ -339,28 +336,8 @@ async function handleRefresh() {
   const url = await getCurrentUrl();
   
   try {
-    // First check if this URL is excluded by domain rules
-    // We do this by asking the background script to check the URL without clearing cache
-    await chrome.runtime.sendMessage({ action: 'checkUrl', url: url, checkRulesOnly: true });
-    
-    // Wait a short moment for the background script to update status
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    // Get the current status to see if it's excluded
-    const { currentTabStatus } = await chrome.storage.local.get('currentTabStatus');
-    
-    if (currentTabStatus && currentTabStatus.domainExcluded) {
-      // This URL is excluded by domain rules, don't proceed with refresh
-      updateStatusUI('gray', 'This URL type is excluded by domain rules');
-      elements.lastChecked.textContent = 'N/A';
-      return;
-    }
-    
-    // Clear cache for this URL in background script
-    await chrome.runtime.sendMessage({ action: 'clearCacheForUrl', url: url });
-    
-    // Trigger re-check in background script with full API check
-    await chrome.runtime.sendMessage({ action: 'checkUrl', url: url });
+    // Always trigger a full check (cache + API if needed) when refresh is clicked
+    await chrome.runtime.sendMessage({ action: 'checkUrl', url: url, cacheOnly: false });
 
     // Wait a short moment for the background script to update status
     await new Promise(resolve => setTimeout(resolve, 500)); 
@@ -368,9 +345,9 @@ async function handleRefresh() {
     // Reload and display the updated status
     await loadAndDisplayStatus(url);
     
-  } catch (error) {
+  } catch (error) { // Use different variable name
     console.error('Error during refresh:', error);
-    updateStatusUI('gray', 'Error refreshing status');
+    updateStatusUI('GRAY', 'Error refreshing status');
     elements.lastChecked.textContent = 'Error';
     // Handle potential communication errors with background script
     if (error.message?.includes('Could not establish connection')) {
@@ -382,6 +359,25 @@ async function handleRefresh() {
 // Handle options/setup button click
 function handleOptions() {
   chrome.runtime.openOptionsPage();
+}
+
+// Helper function to format time ago
+function formatTimeAgo(timestamp) {
+    const now = Date.now();
+    const secondsPast = (now - timestamp) / 1000;
+
+    if (secondsPast < 60) {
+        return 'Just now';
+    }
+    if (secondsPast < 3600) {
+        return parseInt(secondsPast / 60) + 'm ago';
+    }
+    if (secondsPast <= 86400) {
+        return parseInt(secondsPast / 3600) + 'h ago';
+    }
+    // For older timestamps, you might want to show the date
+    const date = new Date(timestamp);
+    return date.toLocaleDateString(); 
 }
 
 // Initialize the popup

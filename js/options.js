@@ -252,11 +252,45 @@ const elements = {
   cacheDurationUnit: document.getElementById('cache-duration-unit'),
   clearCacheButton: document.getElementById('clear-cache-button'),
   forceFullSyncButton: document.getElementById('force-full-sync-button'),
+  aggressiveCachingToggle: document.getElementById('aggressive-caching-toggle'),
   
   // General
   saveButton: document.getElementById('save-button'),
-  statusMessage: document.getElementById('status-message')
+  // Remove global status message element
+  // statusMessage: document.getElementById('status-message')
+  
+  // Add local status elements (optional, can select inside functions)
+  // authActionStatus: document.getElementById('auth-action-status'),
+  // cacheActionStatus: document.getElementById('cache-action-status'),
+  // saveStatus: document.getElementById('save-status')
 };
+
+// Helper function to display status messages locally
+let statusTimers = {}; // Keep track of timers for different status areas
+function displayStatus(targetElementId, message, type, duration = 5000) {
+    const statusElement = document.getElementById(targetElementId);
+    if (!statusElement) {
+        console.error(`Status element with ID ${targetElementId} not found.`);
+        return;
+    }
+
+    // Clear existing timer for this specific target if it exists
+    if (statusTimers[targetElementId]) {
+        clearTimeout(statusTimers[targetElementId]);
+    }
+
+    statusElement.textContent = message;
+    statusElement.className = 'status local-status ' + type; // Ensure base classes are present
+    statusElement.style.display = 'block'; // Make sure it's visible
+
+    // Set a new timer to hide/clear the message
+    statusTimers[targetElementId] = setTimeout(() => {
+        statusElement.textContent = '';
+        statusElement.className = 'status local-status'; // Reset classes
+        statusElement.style.display = 'none'; // Hide it
+        delete statusTimers[targetElementId]; // Remove timer reference
+    }, duration);
+}
 
 // Initialize the options page
 async function init() {
@@ -281,7 +315,8 @@ async function loadSettings() {
     'workspaceId',
     'workspaceName',
     'botId',
-    'domainRules'
+    'domainRules',
+    'aggressiveCachingEnabled'
   ]);
   
   return {
@@ -293,7 +328,8 @@ async function loadSettings() {
     workspaceId: result.workspaceId,
     workspaceName: result.workspaceName,
     botId: result.botId,
-    domainRules: result.domainRules || DEFAULT_DOMAIN_RULES
+    domainRules: result.domainRules || DEFAULT_DOMAIN_RULES,
+    aggressiveCachingEnabled: result.aggressiveCachingEnabled || false
   };
 }
 
@@ -385,6 +421,9 @@ async function updateUI(settings) {
     elements.forceFullSyncButton.disabled = true;
   }
   
+  // Aggressive Caching Toggle
+  elements.aggressiveCachingToggle.checked = settings.aggressiveCachingEnabled;
+  
   // Load domain rules
   loadDomainRules(settings.domainRules || DEFAULT_DOMAIN_RULES);
   
@@ -408,9 +447,10 @@ async function updateUI(settings) {
 async function handleLogin() {
   try {
     await handleTokenLogin();
+    // Login success/failure is handled within handleTokenLogin
   } catch (error) {
     console.error('Authentication error:', error);
-    showStatus('Authentication failed: ' + error.message, 'error');
+    displayStatus('auth-action-status', 'Authentication failed: ' + error.message, 'error');
   }
 }
 
@@ -454,10 +494,13 @@ async function handleTokenLogin() {
     const settings = await loadSettings();
     updateUI(settings);
     
-    showStatus('Successfully connected to Notion', 'success');
+    displayStatus('auth-action-status', 'Successfully connected to Notion', 'success');
+
   } catch (error) {
     console.error('Token validation error:', error);
-    showStatus('Authentication failed: ' + error.message, 'error');
+    displayStatus('auth-action-status', 'Authentication failed: ' + error.message, 'error');
+    // Re-throw or handle as needed if caller needs to know
+    throw error;
   }
 }
 
@@ -487,7 +530,7 @@ async function handleLogout() {
   elements.propertySelect.disabled = true;
   elements.lastEditedPropertySelect.disabled = true;
   
-  showStatus('Disconnected from Notion', 'info');
+  displayStatus('auth-action-status', 'Disconnected from Notion', 'info');
 }
 
 // Load databases from Notion
@@ -547,10 +590,13 @@ async function loadDatabases() {
     elements.databaseSelect.disabled = false;
   } catch (error) {
     console.error('Error loading databases:', error);
+    // Display error near the database section? Need a placeholder there.
+    // For now, let's use the auth status area as a fallback.
+    displayStatus('auth-action-status', 'Error loading databases: ' + error.message, 'error');
+    // Update selects to show failure
     elements.databaseSelect.innerHTML = '<option value="">Failed to load databases</option>';
     elements.propertySelect.innerHTML = '<option value="">Select a database first</option>';
     elements.lastEditedPropertySelect.innerHTML = '<option value="">Select a database first</option>';
-    showStatus('Error loading databases: ' + error.message, 'error');
   }
 }
 
@@ -645,9 +691,11 @@ async function loadProperties(databaseId) {
 
   } catch (error) {
     console.error('Error loading properties:', error);
+    // Display error near the property section? Need a placeholder there.
+    // Using auth status area as fallback.
+    displayStatus('auth-action-status', 'Error loading properties: ' + error.message, 'error');
     elements.propertySelect.innerHTML = '<option value="">Failed to load properties</option>';
     elements.lastEditedPropertySelect.innerHTML = '<option value="">Failed to load properties</option>';
-    showStatus('Error loading properties: ' + error.message, 'error');
   }
 }
 
@@ -869,19 +917,49 @@ function getCurrentDomainRules() {
 
 // Handle clear cache button
 async function handleClearCache() {
-  await chrome.storage.local.remove(['urlCache', 'lastSyncTimestamp']);
-  showStatus('Cache and sync timestamp cleared successfully', 'success');
+  const button = elements.clearCacheButton;
+  button.disabled = true;
+  button.classList.add('loading');
+  try {
+    await chrome.storage.local.remove(['urlCache', 'lastSyncTimestamp']);
+    displayStatus('cache-action-status', 'Cache and sync timestamp cleared successfully', 'success');
+  } catch (error) {
+    console.error("Error clearing cache:", error);
+    displayStatus('cache-action-status', `Error clearing cache: ${error.message}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.classList.remove('loading');
+  }
 }
 
 // Handle force full sync button
 async function handleForceFullSync() {
+    const button = elements.forceFullSyncButton;
+    // Disable button and show loading state
+    button.disabled = true;
+    button.classList.add('loading');
+    displayStatus('cache-action-status', 'Triggering full sync... This may take some time.', 'info', 15000); // Longer duration for sync message
+
     try {
-        showStatus('Triggering full sync...', 'info');
-        await chrome.runtime.sendMessage({ action: 'forceFullSync' });
-        setTimeout(() => showStatus('Full sync triggered in background.', 'success'), 1000); 
+        // Send message and wait for response
+        const result = await chrome.runtime.sendMessage({ action: 'forceFullSync' });
+        
+        // Handle response
+        if (result && result.success) {
+            displayStatus('cache-action-status', `Full sync complete. Processed ${result.pagesProcessed || 0} pages. Updated ${result.urlsUpdated || 0} URLs.`, 'success');
+        } else if (result) {
+            displayStatus('cache-action-status', `Sync failed: ${result.error || 'Unknown error'}`, 'error');
+        } else {
+             displayStatus('cache-action-status', 'Sync failed: No response from background script.', 'error');
+        }
+
     } catch (error) {
         console.error('Error sending forceFullSync message:', error);
-        showStatus(`Error triggering sync: ${error.message}`, 'error');
+        displayStatus('cache-action-status', `Error triggering sync: ${error.message}`, 'error');
+    } finally {
+        // Re-enable button and remove loading state regardless of outcome
+        button.disabled = false;
+        button.classList.remove('loading');
     }
 }
 
@@ -895,6 +973,7 @@ async function handleSaveSettings() {
     const lastEditedPropertyName = elements.lastEditedPropertySelect.value;
     const cacheDuration = calculateCacheDuration();
     const domainRules = getCurrentDomainRules();
+    const aggressiveCachingEnabled = elements.aggressiveCachingToggle.checked;
     
     // Validate token
     if (!integrationToken) {
@@ -930,7 +1009,8 @@ async function handleSaveSettings() {
       authMethod: 'token',
       integrationToken,
       cacheDuration,
-      domainRules
+      domainRules,
+      aggressiveCachingEnabled
     };
     
     // Only include database settings if they're selected and we are connected
@@ -952,20 +1032,22 @@ async function handleSaveSettings() {
     // Save settings
     await chrome.storage.local.set(dataToSave);
     
-    showStatus('Settings saved successfully', 'success');
+    displayStatus('save-status', 'Settings saved successfully', 'success');
 
-     // Trigger a full sync if critical settings changed
+     // Trigger background actions if needed
      if (triggerFullSync) {
-        showStatus('Database settings changed, triggering full sync...', 'info');
-        await chrome.runtime.sendMessage({ action: 'forceFullSync' });
-     } else if (oldSettings.cacheDuration !== cacheDuration) {
-         // If only cache duration changed, maybe reschedule the alarm?
-         await chrome.runtime.sendMessage({ action: 'rescheduleSyncAlarm' });
+        displayStatus('cache-action-status', 'Database settings changed, triggering full sync...', 'info', 10000);
+        // Don't await this, let it run in background
+        chrome.runtime.sendMessage({ action: 'forceFullSync' }).catch(err => console.error("Error triggering sync after save:", err));
+     } else if (oldSettings.cacheDuration !== cacheDuration || oldSettings.lastEditedPropertyName !== lastEditedPropertyName) {
+         // Reschedule alarm if cache duration or lastEditedProperty changed
+         displayStatus('cache-action-status', 'Rescheduling background sync...', 'info');
+         chrome.runtime.sendMessage({ action: 'rescheduleSyncAlarm' }).catch(err => console.error("Error rescheduling sync alarm:", err));
      }
 
   } catch (error) {
     console.error('Error saving settings:', error);
-    showStatus('Error saving settings: ' + error.message, 'error');
+    displayStatus('save-status', 'Error saving settings: ' + error.message, 'error');
   }
 }
 
@@ -979,17 +1061,6 @@ function calculateCacheDuration() {
   }
   
   return cacheDurationValue * cacheDurationUnit;
-}
-
-// Show status message
-function showStatus(message, type) {
-  elements.statusMessage.textContent = message;
-  elements.statusMessage.className = 'status ' + type;
-  
-  // Hide after 5 seconds
-  setTimeout(() => {
-    elements.statusMessage.className = 'status';
-  }, 5000);
 }
 
 // Initialize the options page
