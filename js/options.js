@@ -253,6 +253,7 @@ const elements = {
   clearCacheButton: document.getElementById('clear-cache-button'),
   forceFullSyncButton: document.getElementById('force-full-sync-button'),
   aggressiveCachingToggle: document.getElementById('aggressive-caching-toggle'),
+  logLevelSelect: document.getElementById('log-level-select'),
   
   // General
   saveButton: document.getElementById('save-button'),
@@ -316,7 +317,8 @@ async function loadSettings() {
     'workspaceName',
     'botId',
     'domainRules',
-    'aggressiveCachingEnabled'
+    'aggressiveCachingEnabled',
+    'logLevel'
   ]);
   
   return {
@@ -329,7 +331,8 @@ async function loadSettings() {
     workspaceName: result.workspaceName,
     botId: result.botId,
     domainRules: result.domainRules || DEFAULT_DOMAIN_RULES,
-    aggressiveCachingEnabled: result.aggressiveCachingEnabled || false
+    aggressiveCachingEnabled: result.aggressiveCachingEnabled || false,
+    logLevel: result.logLevel || 'INFO'
   };
 }
 
@@ -423,6 +426,9 @@ async function updateUI(settings) {
   
   // Aggressive Caching Toggle
   elements.aggressiveCachingToggle.checked = settings.aggressiveCachingEnabled;
+  
+  // Log Level Select
+  elements.logLevelSelect.value = settings.logLevel;
   
   // Load domain rules
   loadDomainRules(settings.domainRules || DEFAULT_DOMAIN_RULES);
@@ -974,6 +980,7 @@ async function handleSaveSettings() {
     const cacheDuration = calculateCacheDuration();
     const domainRules = getCurrentDomainRules();
     const aggressiveCachingEnabled = elements.aggressiveCachingToggle.checked;
+    const logLevel = elements.logLevelSelect.value;
     
     // Validate token
     if (!integrationToken) {
@@ -1010,7 +1017,8 @@ async function handleSaveSettings() {
       integrationToken,
       cacheDuration,
       domainRules,
-      aggressiveCachingEnabled
+      aggressiveCachingEnabled,
+      logLevel
     };
     
     // Only include database settings if they're selected and we are connected

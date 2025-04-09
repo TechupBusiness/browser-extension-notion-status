@@ -89,6 +89,18 @@
         <input type="checkbox" id="aggressive-caching-toggle" style="width: auto; flex-grow: 0;">
         <small class="hint" style="margin: 0; flex-grow: 1;">Determine RED/ORANGE status proactively on tab switch using cached data (may impact performance with large databases).</small>
       </div>
+      
+      <!-- Add Log Level Selector -->
+      <div class="input-group" style="margin-top: 15px;">
+         <label for="log-level-select">Console Log Level:</label>
+         <select id="log-level-select">
+           <option value="ERROR">Error</option>
+           <option value="WARN">Warn</option>
+           <option value="INFO">Info</option>
+           <option value="DEBUG">Debug</option>
+         </select>
+         <small class="hint" style="margin: 0; flex-grow: 1;">Controls the amount of information logged to the browser console. Default: Info.</small>
+      </div>
     </div>
     
     <div id="domain-exclusion-section" class="section">

@@ -27,12 +27,59 @@ const ICON_STATES = {
   }
 };
 
+// --- Log Levels --- 
+const LOG_LEVELS = {
+  NONE: -1,
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3
+};
+let currentLogLevel = LOG_LEVELS.INFO; // Default log level
+
+// --- Logger Functions --- 
+async function getLogLevel() {
+  try {
+    const { logLevel = 'INFO' } = await chrome.storage.local.get('logLevel');
+    return LOG_LEVELS[logLevel.toUpperCase()] ?? LOG_LEVELS.INFO;
+  } catch {
+    return LOG_LEVELS.INFO; // Default on error
+  }
+}
+
+// Update log level periodically or on demand (optional, simple check on each log for now)
+// async function updateLogLevel() {
+//    currentLogLevel = await getLogLevel();
+// }
+// updateLogLevel(); // Initial fetch
+
+async function logMessage(level, ...args) {
+  const configuredLevel = await getLogLevel();
+  if (level <= configuredLevel) {
+    const levelStr = Object.keys(LOG_LEVELS).find(key => LOG_LEVELS[key] === level);
+    const prefix = `[${levelStr || 'LOG'}]`;
+    switch(level) {
+      case LOG_LEVELS.ERROR: console.error(prefix, ...args); break;
+      case LOG_LEVELS.WARN: console.warn(prefix, ...args); break;
+      case LOG_LEVELS.INFO: console.info(prefix, ...args); break;
+      case LOG_LEVELS.DEBUG: console.debug(prefix, ...args); break;
+      default: console.log(prefix, ...args); break;
+    }
+  }
+}
+
+const logError = (...args) => logMessage(LOG_LEVELS.ERROR, ...args);
+const logWarn = (...args) => logMessage(LOG_LEVELS.WARN, ...args);
+const logInfo = (...args) => logMessage(LOG_LEVELS.INFO, ...args);
+const logDebug = (...args) => logMessage(LOG_LEVELS.DEBUG, ...args);
+
 // --- Simple Locking Mechanism ---
 const currentlyCheckingUrls = new Set();
 const SYNC_ALARM_NAME = 'notion-status-sync';
 
 // Initialize the extension
 async function init() {
+  // updateLogLevel(); // Update log level on init
   // Set up listeners for tab changes
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab.active) {
@@ -67,14 +114,13 @@ async function checkCurrentUrl(url, cacheOnly = false) {
 
   // --- Lock Check ---
   if (currentlyCheckingUrls.has(url)) {
-    console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Already checking URL: ${url}. Skipping.`);
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Already checking URL: ${url}. Skipping.`);
     return;
   }
   currentlyCheckingUrls.add(url);
-  console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Starting check for URL: ${url}. Lock acquired.`);
+  logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Starting check for URL: ${url}. Lock acquired.`);
 
   // --- Set initial GRAY state while checking ---
-  // Don't set text here, let the logic below determine final text
   await setIconState('GRAY'); 
 
   try {
@@ -82,38 +128,37 @@ async function checkCurrentUrl(url, cacheOnly = false) {
     const config = await getUserConfig();
     if (!config.integrationToken || !config.databaseId || !config.propertyName) {
       await setIconState('GRAY', { error: 'Extension not configured.' });
+      logError('Extension not configured.');
       return; // Exit early if not configured
     }
 
     const domainRuleInfo = await shouldDoPartialMatching(url);
     if (domainRuleInfo === false) {
-      console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URL excluded by domain rules: ${url}`);
+      logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URL excluded by domain rules: ${url}`);
       await setIconState('GRAY', { text: 'URL excluded by domain rules.', domainExcluded: true });
-      // Cache this exclusion? Maybe not, rules can change. Let domain check handle it.
       return; // Exit early if domain is excluded
     }
 
     // --- 2. Generate URLs to Check (Variations + Ancestors/Partials) ---
     const exactVariations = generateExactMatchVariations(url);
     let ancestorPartials = [];
-    if (domainRuleInfo === true) { // Default partial matching
+    if (domainRuleInfo === true) { 
         ancestorPartials = generateAncestorUrls(url); 
-    } else if (typeof domainRuleInfo === 'object') { // Custom rule-based matching
+    } else if (typeof domainRuleInfo === 'object') { 
         ancestorPartials = await generateCustomAncestorUrls(url, domainRuleInfo);
     }
-    // Combine and deduplicate
     const allUrlsToCheck = Array.from(new Set([...exactVariations, ...ancestorPartials]));
-    console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs to check in cache:`, allUrlsToCheck);
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs to check in cache:`, allUrlsToCheck);
 
     // --- 3. Check Cache --- 
     const cachePromises = allUrlsToCheck.map(u => checkCache(u, config.cacheDuration));
     const cacheResults = await Promise.all(cachePromises);
     
-    let foundGreen = null;       // Store the GREEN cache entry if found
-    let foundOrange = null;      // Store the first ORANGE cache entry if found
-    let allRed = true;           // Assume all are RED until proven otherwise
-    let needsApiCheck = false;   // Flag if any cache miss or expired GREEN occurred
-    const foundMatchingUrls = new Set(); // Collect URLs from ORANGE results
+    let foundGreen = null;       
+    let foundOrange = null;      
+    let allRed = true;           
+    let needsApiCheck = false;   
+    const foundMatchingUrls = new Set(); 
 
     for (let i = 0; i < allUrlsToCheck.length; i++) {
         const checkUrl = allUrlsToCheck[i];
@@ -121,64 +166,56 @@ async function checkCurrentUrl(url, cacheOnly = false) {
 
         if (cacheEntry) {
             if (cacheEntry.status === 'GREEN') {
-                console.log(`[Cache Check] Found valid GREEN for: ${checkUrl} (points to ${cacheEntry.canonicalUrl})`);
-                foundGreen = cacheEntry; // Prioritize GREEN
+                logDebug(`[Cache Check] Found valid GREEN for: ${checkUrl} (points to ${cacheEntry.canonicalUrl})`);
+                foundGreen = cacheEntry;
                 allRed = false;
-                break; // Stop checking cache once GREEN is found
+                break; 
             } else if (cacheEntry.status === 'ORANGE') {
-                 console.log(`[Cache Check] Found ORANGE for: ${checkUrl}`);
-                 if (!foundOrange) foundOrange = cacheEntry; // Keep the first ORANGE found
+                 logDebug(`[Cache Check] Found ORANGE for: ${checkUrl}`);
+                 if (!foundOrange) foundOrange = cacheEntry; 
                  cacheEntry.matchingUrls?.forEach(u => foundMatchingUrls.add(u));
                  allRed = false;
             } else if (cacheEntry.status === 'RED') {
-                 console.log(`[Cache Check] Found RED for: ${checkUrl}`);
-                 // Stays allRed = true if this is the only non-null result so far
+                 logDebug(`[Cache Check] Found RED for: ${checkUrl}`);
             }
         } else {
-            // Cache miss (null result from checkCache - includes expired GREEN)
-             console.log(`[Cache Check] Cache miss/expired for: ${checkUrl}`);
+             logDebug(`[Cache Check] Cache miss/expired for: ${checkUrl}`);
              needsApiCheck = true;
-             allRed = false; // Cannot be all RED if there was a miss
+             allRed = false; 
         }
     }
 
     // --- 4. Determine Action Based on Cache Results ---
-    
-    // 4a. GREEN found in cache?
     if (foundGreen) {
-        console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: GREEN (from cache)`);
+        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: GREEN (from cache)`);
         await setIconState('GREEN');
         // Optimization: Update cache for all *exact variations* to point to this canonical URL
         const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', { canonicalUrl: foundGreen.canonicalUrl }));
         await Promise.all(updatePromises);
-        return; // Done
+        return; 
     }
-
-    // 4b. ORANGE found in cache (and no GREEN)?
     if (foundOrange) {
         const finalMatchingUrls = Array.from(foundMatchingUrls);
-        console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: ORANGE (from cache), matches:`, finalMatchingUrls);
+        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: ORANGE (from cache), matches:`, finalMatchingUrls);
         await setIconState('ORANGE', { matchingUrls: finalMatchingUrls });
-        return; // Done
+        return; 
     }
-
-    // 4c. All checked URLs were cached as RED?
     if (allRed) {
-        console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: RED (all variations/ancestors cached as RED)`);
+        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: RED (all variations/ancestors cached as RED)`);
         await setIconState('RED');
-        return; // Done
+        return; 
     }
 
     // 4d. Cache was inconclusive (mix of RED and misses/expired, or only misses/expired)?
     // If cacheOnly is true, check the aggressive caching setting
     if (cacheOnly) {
-        console.log(`[CacheOnly Debug] Cache check results for ${url}: `,
+        logDebug(`[CacheOnly Debug] Cache check results for ${url}: `,
                     `foundGreen: ${!!foundGreen}, `,
                     `foundOrange: ${!!foundOrange}, `,
                     `allRed: ${allRed}, `,
                     `needsApiCheck: ${needsApiCheck}`);
         if (config.aggressiveCachingEnabled) {
-            console.log("[CacheOnly][Aggressive] Cache inconclusive, performing aggressive check against full cache...");
+            logInfo("[CacheOnly][Aggressive] Cache inconclusive, performing aggressive check against full cache...");
             try {
                 const { urlCache = {} } = await chrome.storage.local.get('urlCache');
                 const validGreenUrls = Object.entries(urlCache)
@@ -186,10 +223,10 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                     .map(([_, entry]) => entry.canonicalUrl)
                     .filter(Boolean); // Ensure canonicalUrl exists
                 
-                console.log(`[CacheOnly][Aggressive] Found ${validGreenUrls.length} valid GREEN URLs in cache to check against.`);
+                logDebug(`[CacheOnly][Aggressive] Found ${validGreenUrls.length} valid GREEN URLs in cache to check against.`);
 
                 if (validGreenUrls.length === 0) {
-                     console.log("[CacheOnly][Aggressive] No valid GREEN URLs in cache. Setting RED.");
+                     logInfo("[CacheOnly][Aggressive] No valid GREEN URLs in cache. Setting RED.");
                      await updateCache(url, 'RED'); // Cache original URL as RED
                      await setIconState('RED');
                      return;
@@ -214,63 +251,62 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                             if (parsedCheckUrl.hostname === parsedCachedGreen.hostname && 
                                 parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
                                 
-                                console.log(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
+                                logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
                                 aggressiveMatchFound = true;
                                 aggressiveMatchingUrls.add(cachedGreenUrl); 
                                 // Don't break here, collect all potential partial matches from cache
                             }
                         }
                     } catch (e) {
-                        console.warn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
+                        logWarn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
                     } 
                 }
 
                 if (aggressiveMatchFound) {
                     const finalMatches = Array.from(aggressiveMatchingUrls);
-                    console.log("[CacheOnly][Aggressive] Final state: ORANGE (determined from cache), matches:", finalMatches);
+                    logInfo("[CacheOnly][Aggressive] Final state: ORANGE (determined from cache), matches:", finalMatches);
                     await updateCache(url, 'ORANGE', { matchingUrls: finalMatches });
                     await setIconState('ORANGE', { matchingUrls: finalMatches });
                 } else {
-                    console.log("[CacheOnly][Aggressive] Final state: RED (no matches found in cached GREEN URLs).");
+                    logInfo("[CacheOnly][Aggressive] Final state: RED (no matches found in cached GREEN URLs).");
                     await updateCache(url, 'RED');
                     await setIconState('RED');
                 }
 
             } catch (error) {
-                console.error("[CacheOnly][Aggressive] Error during aggressive cache check:", error);
+                logError("[CacheOnly][Aggressive] Error during aggressive cache check:", error);
                 // Fallback to GRAY if aggressive check fails
                 await setIconState('GRAY', { text: 'Aggressive cache check failed. Click icon.' });
             }
 
         } else {
-            // Aggressive caching disabled, keep GRAY
-            console.log(`[CacheOnly] Final state: GRAY (cache inconclusive, aggressive caching disabled)`);
+            logInfo(`[CacheOnly] Final state: GRAY (cache inconclusive, aggressive caching disabled)`);
             await setIconState('GRAY', { text: 'Cached status unclear. Click icon to check Notion.' });
         }
-        return; // Done for cacheOnly mode
+        return; 
     }
 
     // --- 5. Perform API Check (only if cacheOnly is false and cache was inconclusive) ---
-    console.log(`[API Check] Cache inconclusive, proceeding with API calls.`);
+    logInfo(`[API Check] Cache inconclusive, proceeding with API calls.`);
 
     try {
         // 5a. Check Exact Variations via API
-        console.log("[API Check] Querying API for exact variations:", exactVariations);
+        logInfo("[API Check] Querying API for exact variations:", exactVariations);
         const exactApiResultPages = await queryNotionForMultipleUrls(exactVariations, config);
 
         if (exactApiResultPages.length > 0) {
             // --- Exact Match Found via API --- 
             const firstMatch = exactApiResultPages[0];
             const canonicalUrlFromApi = firstMatch.properties[config.propertyName]?.url || exactVariations[0]; // Fallback needed?
-            console.log(`[API Check] Final state: GREEN (found via API: ${canonicalUrlFromApi})`);
+            logInfo(`[API Check] Final state: GREEN (found via API: ${canonicalUrlFromApi})`);
             
             await setIconState('GREEN');
             // Update cache for all *exact variations* as GREEN
             const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', { canonicalUrl: canonicalUrlFromApi }));
             await Promise.all(updatePromises);
-            return; // Done
+            return; 
         } else {
-            console.log("[API Check] No exact matches found via API.");
+            logInfo("[API Check] No exact matches found via API.");
             // Cache *exact variations* as RED since API confirmed they aren't present
             // --- Start Bulk Update --- 
             try {
@@ -280,31 +316,29 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                     if (!urlCache[variation] || urlCache[variation].status !== 'RED') {
                         urlCache[variation] = { status: 'RED', timestamp: Date.now() };
                         changed = true;
-                        console.log(`[API Check] Marking exact variation ${variation} as RED in cache.`);
+                        logDebug(`[API Check] Marking exact variation ${variation} as RED in cache.`);
                     }
                 }
                 if (changed) {
                     await chrome.storage.local.set({ urlCache });
-                    console.log("[API Check] Bulk updated exact variations cache to RED.");
+                    logInfo("[API Check] Bulk updated exact variations cache to RED.");
                 }
             } catch(cacheError) {
-                 console.error("[API Check] Error bulk updating exact variations cache to RED:", cacheError);
+                 logError("[API Check] Error bulk updating exact variations cache to RED:", cacheError);
             }
             // --- End Bulk Update --- 
-            // const updatePromises = exactVariations.map(v => updateCache(v, 'RED')); 
-            // await Promise.all(updatePromises); 
         }
 
         // 5b. Check Ancestors/Partials via API (only if no exact match found)
         // Use ancestorPartials generated earlier
         if (ancestorPartials.length > 0) {
-             console.log("[API Check] Querying API for ancestors/partials:", ancestorPartials);
+             logInfo("[API Check] Querying API for ancestors/partials:", ancestorPartials);
              const partialApiResultPages = await queryNotionForMultipleUrls(ancestorPartials, config);
 
              if (partialApiResultPages.length > 0) {
                  // --- Partial/Ancestor Match Found via API ---
                  const partialMatchingUrls = partialApiResultPages.map(p => p.properties[config.propertyName]?.url).filter(Boolean);
-                 console.log(`[API Check] Final state: ORANGE (found ${partialMatchingUrls.length} ancestors/partials via API):`, partialMatchingUrls);
+                 logInfo(`[API Check] Final state: ORANGE (found ${partialMatchingUrls.length} ancestors/partials via API):`, partialMatchingUrls);
                  
                  await setIconState('ORANGE', { matchingUrls: partialMatchingUrls });
                  // Update cache for the *original URL* as ORANGE
@@ -312,9 +346,9 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                  // Update cache for the *found* ancestor URLs as GREEN
                  const updatePromises = partialMatchingUrls.map(foundUrl => updateCache(foundUrl, 'GREEN', { canonicalUrl: foundUrl }));
                  await Promise.all(updatePromises);
-                 return; // Done
+                 return; 
              } else {
-                 console.log("[API Check] No ancestors/partials found via API.");
+                 logInfo("[API Check] No ancestors/partials found via API.");
                  // Cache checked *ancestors/partials* as RED
                  // --- Start Bulk Update --- 
                  try {
@@ -324,31 +358,28 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                          if (!urlCache[ancestor] || urlCache[ancestor].status !== 'RED') {
                              urlCache[ancestor] = { status: 'RED', timestamp: Date.now() };
                              changed = true;
-                             console.log(`[API Check] Marking ancestor/partial ${ancestor} as RED in cache.`);
+                             logDebug(`[API Check] Marking ancestor/partial ${ancestor} as RED in cache.`);
                          }
                     }
                     if (changed) {
                          await chrome.storage.local.set({ urlCache });
-                         console.log("[API Check] Bulk updated ancestors/partials cache to RED.");
+                         logInfo("[API Check] Bulk updated ancestors/partials cache to RED.");
                     }
                  } catch(cacheError) {
-                     console.error("[API Check] Error bulk updating ancestor/partial cache to RED:", cacheError);
+                     logError("[API Check] Error bulk updating ancestor/partial cache to RED:", cacheError);
                  }
                  // --- End Bulk Update ---
-                 // const updatePromises = ancestorPartials.map(ap => updateCache(ap, 'RED'));
-                 // await Promise.all(updatePromises);
              }
         }
 
         // 5c. No Matches Found via API (Exact or Partial)
-        console.log(`[API Check] Final state: RED (no matches found in API)`);
+        logInfo(`[API Check] Final state: RED (no matches found in API)`);
         await setIconState('RED');
         // Cache entries for exact variations and ancestors/partials were already set to RED above.
-        return; // Done
+        return; 
 
     } catch (error) {
-        // Handle API errors during the check process
-        console.error('[API Check] Error during Notion API query:', error);
+        logError('[API Check] Error during Notion API query:', error);
         let errorText = `API Error: ${error.message || 'Unknown'}`;
         if (error.status === 401) {
             errorText = 'Notion Authentication Failed.';
@@ -360,13 +391,11 @@ async function checkCurrentUrl(url, cacheOnly = false) {
     }
 
   } catch (error) {
-    // General error handler for the entire check process
-    console.error(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Unhandled error during checkCurrentUrl for ${url}:`, error);
+    logError(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Unhandled error during checkCurrentUrl for ${url}:`, error);
     await setIconState('GRAY', { error: `Error: ${error.message || 'Unknown error'}` });
   } finally {
-    // --- Release Lock ---
     currentlyCheckingUrls.delete(url);
-    console.log(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Finished check for URL: ${url}. Lock released.`);
+    logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Finished check for URL: ${url}. Lock released.`);
   }
 }
 
@@ -378,7 +407,8 @@ async function getUserConfig() {
     'propertyName',
     'cacheDuration',
     'lastEditedPropertyName',
-    'aggressiveCachingEnabled'
+    'aggressiveCachingEnabled',
+    'logLevel' // Ensure logLevel is loaded here
   ]);
   
   return {
@@ -387,7 +417,8 @@ async function getUserConfig() {
     propertyName: result.propertyName,
     cacheDuration: typeof result.cacheDuration === 'number' ? result.cacheDuration : 60,
     lastEditedPropertyName: result.lastEditedPropertyName,
-    aggressiveCachingEnabled: result.aggressiveCachingEnabled || false
+    aggressiveCachingEnabled: result.aggressiveCachingEnabled || false,
+    logLevel: result.logLevel || 'INFO' // Add logLevel return
   };
 }
 
@@ -403,27 +434,22 @@ async function checkCache(url, cacheDuration) {
       const isExpired = now - cacheEntry.timestamp >= cacheDuration * 60 * 1000;
       
       if (isExpired) {
-        console.log(`Cache check for ${url}: Found GREEN entry, but it's expired.`);
-        // Optionally remove expired entry? Or just treat as miss? Let's treat as miss.
-        // delete urlCache[url]; 
-        // await chrome.storage.local.set({ urlCache });
+        logDebug(`Cache check for ${url}: Found GREEN entry, but it's expired.`);
         return null; // Treat expired GREEN as cache miss
       } else {
-        console.log(`Cache check for ${url}: Found valid GREEN entry.`);
+        logDebug(`Cache check for ${url}: Found valid GREEN entry.`);
         return cacheEntry; // Valid GREEN entry
       }
     } else if (cacheEntry.status === 'RED' || cacheEntry.status === 'ORANGE') {
-      // RED and ORANGE statuses do not expire
-      console.log(`Cache check for ${url}: Found non-expiring ${cacheEntry.status} entry.`);
+      logDebug(`Cache check for ${url}: Found non-expiring ${cacheEntry.status} entry.`);
       return cacheEntry;
     } else {
-      // Handle unexpected status or entries without status? Assume miss.
-       console.log(`Cache check for ${url}: Found entry with unexpected status (${cacheEntry.status}). Treating as miss.`);
-       return null;
+      logWarn(`Cache check for ${url}: Found entry with unexpected status (${cacheEntry.status}). Treating as miss.`);
+      return null;
     }
   }
   
-  console.log(`Cache check for ${url}: No entry found.`);
+  logDebug(`Cache check for ${url}: No entry found.`);
   return null; // Cache miss
 }
 
@@ -442,10 +468,10 @@ async function updateCache(url, status, details = {}) {
     urlCache[url] = cacheEntry;
     
     await chrome.storage.local.set({ urlCache });
-    console.log(`Cache updated for ${url}: status: ${status}, details: ${JSON.stringify(details)}`);
+    logDebug(`Cache updated for ${url}: status: ${status}, details: ${JSON.stringify(details)}`);
     
   } catch (error) {
-      console.error(`Error updating cache for ${url}:`, error);
+      logError(`Error updating cache for ${url}:`, error);
   }
 }
 
@@ -554,7 +580,7 @@ async function queryNotionForPartialUrl(urlPrefix, config) {
   if (!response.ok) {
     // Don't throw an error here, as it might just be a temporary issue
     // or permissions problem. Log it and return empty results.
-    console.error(`Notion API error during partial query: ${response.status} ${response.statusText}`);
+    logError(`Notion API error during partial query: ${response.status} ${response.statusText}`);
     // Consider returning a specific error object if needed downstream
     return [];
   }
@@ -587,10 +613,10 @@ async function setIconState(state, details = {}) {
     
     // Store status for the popup to read
     await chrome.storage.local.set({ currentTabStatus: statusToStore });
-    console.log(`Icon state set to ${state}. Stored status:`, statusToStore);
+    logInfo(`Icon state set to ${state}. Stored status:`, statusToStore);
 
   } catch (error) {
-    console.error(`Error setting icon state to ${state}:`, error);
+    logError(`Error setting icon state to ${state}:`, error);
     // Store error state
     await chrome.storage.local.set({ currentTabStatus: { state: 'GRAY', error: `Icon Error: ${error.message}`, timestamp: Date.now() } });
   }
@@ -598,11 +624,10 @@ async function setIconState(state, details = {}) {
 
 // Functions for sync operations
 async function setupSyncAlarm() {
-  // Get user configuration
   const config = await getUserConfig();
   
   if (!config.integrationToken || !config.databaseId || !config.propertyName || !config.lastEditedPropertyName) {
-    console.log('Sync alarm not set up - extension not fully configured');
+    logWarn('Sync alarm not set up - extension not fully configured');
     return;
   }
   
@@ -612,29 +637,28 @@ async function setupSyncAlarm() {
   // Create new alarm - periodic sync every hour by default or whatever user has set
   // Convert minutes to milliseconds for the alarm API
   const minutes = config.cacheDuration || 60; // Default to hourly if not set
-  console.log(`Setting up sync alarm to run every ${minutes} minutes`);
+  logInfo(`Setting up sync alarm to run every ${minutes} minutes`);
   
   chrome.alarms.create(SYNC_ALARM_NAME, {
     periodInMinutes: minutes
   });
   
-  console.log('Sync alarm scheduled successfully');
+  logInfo('Sync alarm scheduled successfully');
   
   // Consider running an initial sync right away if needed
   const { lastSyncTimestamp } = await chrome.storage.local.get('lastSyncTimestamp');
   if (!lastSyncTimestamp) {
-    console.log('No previous sync timestamp, performing initial full sync');
+    logInfo('No previous sync timestamp, performing initial full sync');
     performFullSync();
   }
 }
 
 async function performFullSync() {
-  console.log('Starting full sync operation');
+  logInfo('Starting full sync operation');
   try {
-    // Get user configuration
     const config = await getUserConfig();
     if (!config.databaseId || !config.propertyName) {
-      console.error('Cannot perform sync - database or property not configured');
+      logError('Cannot perform sync - database or property not configured');
       return { success: false, error: 'Extension not fully configured' };
     }
     
@@ -700,11 +724,11 @@ async function performFullSync() {
     // Store the updated cache and timestamp (updateCache already saved, but set timestamp here)
     await chrome.storage.local.set({ lastSyncTimestamp: Date.now() });
     
-    console.log(`Full sync completed. Processed ${totalPages} pages. Updated/Added ${updatedCount} URLs (and variations) to cache as GREEN.`);
+    logInfo(`Full sync completed. Processed ${totalPages} pages. Updated/Added ${updatedCount} URLs (and variations) to cache as GREEN.`);
     return { success: true, pagesProcessed: totalPages, urlsUpdated: updatedCount };
     
   } catch (error) {
-    console.error('Error during full sync:', error);
+    logError('Error during full sync:', error);
      if (error.status === 401) {
          await chrome.storage.local.remove(['integrationToken', 'accessToken']);
          await chrome.storage.local.set({ needsAuthentication: true });
@@ -715,19 +739,18 @@ async function performFullSync() {
 }
 
 async function performDeltaSync() {
-  console.log('Starting delta sync operation');
+  logInfo('Starting delta sync operation');
   try {
-    // Get user configuration
     const config = await getUserConfig();
     if (!config.databaseId || !config.propertyName || !config.lastEditedPropertyName) {
-      console.error('Cannot perform delta sync - database, property or lastEditedProperty not configured');
+      logError('Cannot perform delta sync - database, property or lastEditedProperty not configured');
       return { success: false, error: 'Extension not fully configured for delta sync' };
     }
     
     // Get the timestamp of the last sync
     const { lastSyncTimestamp } = await chrome.storage.local.get('lastSyncTimestamp');
     if (!lastSyncTimestamp) {
-      console.log('No previous sync timestamp found, performing full sync instead');
+      logInfo('No previous sync timestamp found, performing full sync instead');
       return performFullSync();
     }
     
@@ -801,11 +824,11 @@ async function performDeltaSync() {
     // Update the last sync timestamp
     await chrome.storage.local.set({ lastSyncTimestamp: Date.now() });
     
-    console.log(`Delta sync completed. Processed ${pagesProcessed} modified pages. Updated/Added ${updatedCount} URLs (and variations) to cache as GREEN.`);
+    logInfo(`Delta sync completed. Processed ${pagesProcessed} modified pages. Updated/Added ${updatedCount} URLs (and variations) to cache as GREEN.`);
     return { success: true, pagesProcessed, urlsUpdated: updatedCount };
     
   } catch (error) {
-    console.error('Error during delta sync:', error);
+    logError('Error during delta sync:', error);
      if (error.status === 401) {
          await chrome.storage.local.remove(['integrationToken', 'accessToken']);
          await chrome.storage.local.set({ needsAuthentication: true });
@@ -820,11 +843,10 @@ init();
 
 // Listen for messages from the popup and options page
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("Message received:", message);
+  logDebug("Message received:", message);
   
   if (message.action === 'popupOpened') {
-    // Handle popup opened event if needed in the future
-    console.log('Popup was opened.');
+    logInfo('Popup was opened.');
     // Optionally clear badge text here if that was the intention
     sendResponse({ success: true }); // Acknowledge receipt
     return false; // Not sending async response
@@ -834,11 +856,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       clearCacheForUrl(message.url).then(() => {
         sendResponse({ success: true });
       }).catch(error => {
-        console.error('Error clearing cache for URL:', message.url, error);
+        logError('Error clearing cache for URL:', message.url, error);
         sendResponse({ success: false, error: error.message });
       });
       return true; // Indicate async response
     } else {
+      logWarn('Clear cache request missing URL');
       sendResponse({ success: false, error: 'URL not provided for cache clear' });
       return false;
     }
@@ -866,7 +889,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ success: true, excluded: false });
           }
         }).catch(error => {
-          console.error('Error checking rules for URL:', message.url, error);
+          logError('Error checking rules for URL:', message.url, error);
           sendResponse({ success: false, error: error.message });
         });
         return true; // Indicate async response
@@ -876,29 +899,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       checkCurrentUrl(message.url, false).then(() => {
         sendResponse({ success: true });
       }).catch(error => {
-        console.error('Error triggering check for URL:', message.url, error);
+        logError('Error triggering check for URL:', message.url, error);
         sendResponse({ success: false, error: error.message });
       });
       return true; // Indicate async response
     } else {
+      logWarn('Check URL request missing URL');
       sendResponse({ success: false, error: 'URL not provided for check' });
       return false;
     }
   } else if (message.action === 'forceFullSync') {
-    console.log('Full sync requested from options page');
+    logInfo('Full sync requested from options page');
     performFullSync().then(result => {
       sendResponse(result);
     }).catch(error => {
-      console.error('Error during full sync:', error);
+      logError('Error during full sync request:', error);
       sendResponse({ success: false, error: error.message });
     });
     return true; // Indicate async response
   } else if (message.action === 'rescheduleSyncAlarm') {
-    console.log('Sync alarm reschedule requested');
+    logInfo('Sync alarm reschedule requested');
     setupSyncAlarm().then(() => {
       sendResponse({ success: true });
     }).catch(error => {
-      console.error('Error setting up sync alarm:', error);
+      logError('Error setting up sync alarm:', error);
       sendResponse({ success: false, error: error.message });
     });
     return true; // Indicate async response
@@ -910,7 +934,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Indicate async response
   }
   
-  // Default response if action not handled
+  logWarn('Unknown message action received:', message.action);
   sendResponse({ success: false, error: 'Unknown action' });
   return false; // Not sending async response
 });
@@ -918,11 +942,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Add alarm listener for periodic sync
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM_NAME) {
-    console.log('Sync alarm triggered, performing delta sync');
+    logInfo('Sync alarm triggered, performing delta sync');
     performDeltaSync().then(result => {
-      console.log('Delta sync result:', result);
+      logDebug('Delta sync result:', result);
     }).catch(error => {
-      console.error('Error in scheduled delta sync:', error);
+      logError('Error in scheduled delta sync:', error);
     });
   }
 });
@@ -933,9 +957,9 @@ async function clearCacheForUrl(url) {
   if (urlCache[url]) {
     delete urlCache[url];
     await chrome.storage.local.set({ urlCache });
-    console.log('Cache cleared for:', url);
+    logInfo('Cache cleared for:', url);
   } else {
-    console.log('URL not found in cache, no need to clear:', url);
+    logDebug('URL not found in cache, no need to clear:', url);
   }
 }
 
@@ -972,7 +996,7 @@ async function shouldDoPartialMatching(url) {
         
         if (matchingProtocolRule) {
           // Found a rule for this protocol, use its match level directly
-          console.log(`Protocol ${protocol} matched in domain rules`);
+          logDebug(`Protocol ${protocol} matched in domain rules`);
           if (matchingProtocolRule.matchLevel === 'disabled') {
             return false; // Disable matching for this protocol
           }
@@ -986,7 +1010,7 @@ async function shouldDoPartialMatching(url) {
             const parsedUrl = new URL(url);
             domainForCheck = parsedUrl.hostname;
           } catch (error) {
-            console.error(`Error parsing URL: ${url}`, error);
+            logError(`Error parsing URL: ${url}`, error);
             domainForCheck = hostname || protocol;
           }
         }
@@ -997,7 +1021,7 @@ async function shouldDoPartialMatching(url) {
         const parsedUrl = new URL(url);
         domainForCheck = parsedUrl.hostname;
       } catch (error) {
-        console.error(`Cannot parse URL: ${url}`, error);
+        logError(`Cannot parse URL: ${url}`, error);
         return true; // Default to true on error
       }
     }
@@ -1013,22 +1037,22 @@ async function shouldDoPartialMatching(url) {
     
     if (!matchingRule) {
       // No matching rule, do default partial matching
-      console.log(`No domain rule found for ${domainForCheck}, using default partial matching`);
+      logDebug(`No domain rule found for ${domainForCheck}, using default partial matching`);
       return true;
     }
     
     // If match level is 'disabled', no partial matching
     if (matchingRule.matchLevel === 'disabled') {
-      console.log(`Partial matching disabled for ${domainForCheck}`);
+      logDebug(`Partial matching disabled for ${domainForCheck}`);
       return false;
     }
     
     // If it got here, we need to do partial matching but with custom rules
-    console.log(`Using custom partial matching for ${domainForCheck} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
+    logDebug(`Using custom partial matching for ${domainForCheck} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
     return { matchLevel: matchingRule.matchLevel, rule: matchingRule };
     
   } catch (error) {
-    console.error(`Error checking domain rules for ${url}:`, error);
+    logError(`Error checking domain rules for ${url}:`, error);
     return true; // Default to true on error
   }
 }
@@ -1055,7 +1079,7 @@ function generateAncestorUrls(url) {
         }
 
     } catch (e) {
-        console.error("Error generating ancestor URLs for:", url, e);
+        logError("Error generating ancestor URLs for:", url, e);
     }
     return ancestors;
 }
@@ -1104,7 +1128,7 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
         
       default:
         // Default case - just consider full path
-        console.log(`Unknown match level ${matchLevel}, using default ancestor generation`);
+        logDebug(`Unknown match level ${matchLevel}, using default ancestor generation`);
         return generateAncestorUrls(url);
     }
     
@@ -1120,7 +1144,7 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
     return ancestors;
     
   } catch (error) {
-    console.error(`Error generating custom ancestors for ${url}:`, error);
+    logError(`Error generating custom ancestors for ${url}:`, error);
     return generateAncestorUrls(url); // Fall back to default method on error
   }
 }
@@ -1228,7 +1252,7 @@ function generateUrlFromCustomPattern(parsedUrl, pattern) {
     
     return urlAncestors;
   } catch (error) {
-    console.error(`Error generating URL from pattern for ${parsedUrl.href}:`, error);
+    logError(`Error generating URL from pattern for ${parsedUrl.href}:`, error);
     return [`${parsedUrl.protocol}//${parsedUrl.hostname}`]; // Fallback to domain only on error
   }
 }
@@ -1275,7 +1299,7 @@ function generateExactMatchVariations(url) {
 
 
   } catch (e) {
-    console.error("Error generating URL variations for:", url, e);
+    logError("Error generating URL variations for:", url, e);
     variations.add(url); // Fallback to original URL
   }
   
