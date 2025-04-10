@@ -9,8 +9,10 @@ This browser extension shows whether the current webpage URL is stored in your s
 ## Features
 
 - Easy setup with Notion Integration Token
-- Shows green/red/orange status in the toolbar icon
+- Shows green/red/orange/gray status in the toolbar icon
 - Configurable caching to reduce Notion API calls
+- Optional "Aggressive Caching" mode (Beta) to proactively determine status on tab switch
+- Configurable console log level for debugging
 - Automatic background syncing based on Last Edited Time
 - Cache-only checks during normal browsing for better performance
 - Full API checks when you click the extension icon
@@ -70,16 +72,35 @@ Before using the extension, you need to set it up with your Notion Integration T
 
 10. Set your preferred cache duration
 
-11. Save settings
+11. Configure advanced options (see below)
+
+12. Save settings
+
+### Cache and Sync Settings
+
+- **Cache Duration**: How long the extension should remember the status of a URL before checking again (applies mainly to GREEN status; RED/ORANGE statuses persist longer).
+- **Clear Cache**: Manually clears the extension's local cache of URL statuses.
+- **Force Full Sync**: Manually triggers a complete download of all URLs from your selected Notion database into the local cache. Useful for initial setup or if sync seems broken.
+
+### Advanced Options (Cache Settings Section)
+
+- **Aggressive Caching (Beta)**:
+  - **Disabled (Default)**: When switching tabs, if the cache doesn't definitively know the status (e.g., first time seeing a URL, or a known GREEN entry expired), the icon will show GRAY. Clicking the icon triggers an API check for the final status.
+  - **Enabled**: When switching tabs and the cache is inconclusive, the extension will attempt to determine the RED/ORANGE status by comparing the current URL against *all* known GREEN URLs currently in the cache. This reduces GRAY icons but **may impact browser performance** if your Notion database and cache are very large.
+- **Console Log Level**: Controls how much information the extension logs to the browser's background console (useful for debugging).
+  - `Error`: Logs only critical errors.
+  - `Warn`: Logs errors and warnings.
+  - `Info` (Default): Logs errors, warnings, and major actions (like sync start/end, state changes).
+  - `Debug`: Logs detailed step-by-step information (most verbose).
 
 ## How It Works
 
-1. When you visit a webpage, the extension checks if the URL is in your Notion database using its local cache
+1. When you visit a webpage, the extension checks its local cache for the URL status (considering variations and domain rules).
 2. The icon shows:
-   - Green if the URL is found in your database
-   - Orange if a parent URL (like the domain or folder) is found
-   - Red if the URL is not found
-   - Gray if the status is unknown or the extension is not configured
+   - Green if the URL is confirmed present.
+   - Orange if a similar URL (ancestor/pattern match) is confirmed present.
+   - Red if the URL is confirmed absent.
+   - Gray if the cache status is inconclusive (requires API check), the URL type is excluded by domain rules, or the extension isn't configured.
 
    | Status | Meaning | Example |
    |--------|---------|---------|
