@@ -237,21 +237,24 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                      return;
                 }
 
-                // Perform aggressive check (respect matchOnlySelf)
+                // Perform aggressive check (respect allowsPartials from rule)
                 let aggressiveMatchFound = false;
                 const aggressiveMatchingUrls = new Set();
 
-                // Generate relevant check URLs based on matchOnlySelf
+                // Generate relevant check URLs based on allowsPartials
                 const urlsToCheckAggressively = [...exactVariations];
-                if (!matchOnlySelf) {
-                    const currentUrlAncestors = typeof domainRuleInfo === 'object' 
-                        ? await generateCustomAncestorUrls(url, domainRuleInfo) 
-                        : generateAncestorUrls(url);
-                    urlsToCheckAggressively.push(...currentUrlAncestors);
-                } 
+                if (domainRuleInfo.allowsPartials) {
+                    try {
+                        const parsedUrl = new URL(url);
+                        const currentUrlAncestors = generateAncestorsBasedOnRule(parsedUrl, domainRuleInfo);
+                        urlsToCheckAggressively.push(...currentUrlAncestors);
+                    } catch(e) {
+                         logError("[CacheOnly][Aggressive] Error parsing URL or generating ancestors:", e);
+                    }
+                }
                 const uniqueUrlsToCheckAggressively = Array.from(new Set(urlsToCheckAggressively));
 
-                logDebug("[CacheOnly][Aggressive] URLs to check aggressively:", uniqueUrlsToCheckAggressively);
+                logDebug("[CacheOnly][Aggressive] URLs to check aggressively (allowsPartials=${domainRuleInfo.allowsPartials}):", uniqueUrlsToCheckAggressively);
 
                 // Loop through cached green URLs
                 for (const cachedGreenUrl of validGreenUrls) {
@@ -259,18 +262,16 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                         const parsedCachedGreen = new URL(cachedGreenUrl);
                         // Check against the generated list
                         for (const checkUrl of uniqueUrlsToCheckAggressively) {
-                            // Avoid matching self if only checking variations
-                            if (matchOnlySelf && checkUrl === cachedGreenUrl) continue; 
-                            
-                            const parsedCheckUrl = new URL(checkUrl);
-                             // Compare hostname and path prefix (for partials)
-                            if (!matchOnlySelf && // Only do partial check if allowed
-                                parsedCheckUrl.hostname === parsedCachedGreen.hostname && 
+                            // Compare hostname and path prefix (for partials)
+                            if (domainRuleInfo.allowsPartials && // Only do partial check if allowed by rule
+                                parsedCheckUrl.hostname === parsedCachedGreen.hostname &&
                                 parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
-                                
-                                logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
-                                aggressiveMatchFound = true;
-                                aggressiveMatchingUrls.add(cachedGreenUrl); 
+                                // Avoid matching the exact URL itself as a partial (already handled by GREEN check)
+                                if (parsedCheckUrl.href !== parsedCachedGreen.href) {
+                                    logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
+                                    aggressiveMatchFound = true;
+                                    aggressiveMatchingUrls.add(cachedGreenUrl);
+                                }
                             }
                             // We don't need an exact match check here because the initial cache check already handled exact GREEN matches.
                         }
@@ -280,7 +281,7 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                 }
 
                 // Set state based on aggressive check result
-                if (aggressiveMatchFound) { // Will only be true if !matchOnlySelf
+                if (aggressiveMatchFound) { // Will only be true if domainRuleInfo.allowsPartials is true
                     const finalMatches = Array.from(aggressiveMatchingUrls);
                     logInfo("[CacheOnly][Aggressive] Final state: ORANGE (determined from cache), matches:", finalMatches);
                     await updateCache(url, 'ORANGE', { matchingUrls: finalMatches });
@@ -996,6 +997,7 @@ async function shouldDoPartialMatching(url) {
     let protocol = '';
     let hostname = '';
     let domainForCheck = '';
+    let parsedUrlObject = null; // Store the parsed URL object
     
     // Handle special protocol URLs like chrome:// or about:
     const protocolMatch = url.match(/^([a-z-]+):(\/\/)?([^\/]*)/i);
@@ -1021,7 +1023,13 @@ async function shouldDoPartialMatching(url) {
             return false; // Disable matching for this protocol
           }
           // For other match levels, continue with the protocol as the domain
-          return { matchLevel: matchingProtocolRule.matchLevel, rule: matchingProtocolRule };
+          // Determine if partials are allowed based on the match level
+          const allowsPartials = matchingProtocolRule.matchLevel.endsWith('_partials') || matchingProtocolRule.matchLevel === 'domain_partials';
+          return { 
+              matchLevel: matchingProtocolRule.matchLevel, 
+              rule: matchingProtocolRule,
+              allowsPartials: allowsPartials
+          }; 
         }
         
         // If we get here, no specific rule for the protocol, try normal URL parsing
@@ -1029,7 +1037,8 @@ async function shouldDoPartialMatching(url) {
           try {
             const parsedUrl = new URL(url);
             domainForCheck = parsedUrl.hostname;
-          } catch (error) {
+            parsedUrlObject = parsedUrl; // Store parsed object
+          } catch (error) { 
             logError(`Error parsing URL: ${url}`, error);
             domainForCheck = hostname || ''; // Use extracted hostname if parsing fails
           }
@@ -1043,6 +1052,7 @@ async function shouldDoPartialMatching(url) {
       try {
         const parsedUrl = new URL(url);
         domainForCheck = parsedUrl.hostname;
+        parsedUrlObject = parsedUrl; // Store parsed object
       } catch (error) {
         logError(`Cannot parse URL: ${url}`, error);
         return true; // Default to true on error
@@ -1063,27 +1073,38 @@ async function shouldDoPartialMatching(url) {
     });
     
     if (!matchingRule) {
-      logDebug(`No domain rule found for ${domainForCheck}, using default partial matching`);
-      return true; // Default: Allow partial matching, matchOnlySelf is false
+      logDebug(`No domain rule found for ${domainForCheck}, using default (domain_partials)`);
+      return { 
+          matchLevel: 'domain_partials', 
+          rule: null, 
+          allowsPartials: true 
+      }; // Default: Domain matching with partials
     }
     
-    // If match level is 'disabled', no partial matching
+    // If match level is 'disabled', no matching at all
     if (matchingRule.matchLevel === 'disabled') {
-      logDebug(`Partial matching disabled for ${domainForCheck} by rule:`, matchingRule);
+      logDebug(`Matching disabled for ${domainForCheck} by rule:`, matchingRule);
       return false;
     }
     
-    // Return rule info, including matchOnlySelf (defaulting to false)
-    logDebug(`Using custom matching rule for ${domainForCheck}:`, matchingRule);
+    // Determine if partials are allowed based on the match level name
+    const allowsPartials = matchingRule.matchLevel.endsWith('_partials') || matchingRule.matchLevel === 'domain_partials';
+
+    logDebug(`Using custom matching rule for ${domainForCheck} (allowsPartials=${allowsPartials}):`, matchingRule);
     return {
       matchLevel: matchingRule.matchLevel,
       rule: matchingRule,
-      matchOnlySelf: matchingRule.matchOnlySelf || false // Extract the new property
+      allowsPartials: allowsPartials
     };
     
   } catch (error) {
     logError(`Error checking domain rules for ${url}:`, error);
-    return true; // Default to true (allow partials, matchOnlySelf=false) on error
+    // Default to domain_partials with partials allowed on error?
+    return { 
+        matchLevel: 'domain_partials', 
+        rule: null, 
+        allowsPartials: true 
+    };
   }
 }
 
@@ -1114,8 +1135,75 @@ function generateAncestorUrls(url) {
     return ancestors;
 }
 
-// New function to generate ancestor URLs based on domain rule match level
+// New function to generate ancestor URLs based on the specific rule
+function generateAncestorsBasedOnRule(parsedUrl, matchingInfo) {
+  const { matchLevel, rule } = matchingInfo;
+  const ancestors = [];
+  const hostname = parsedUrl.hostname;
+  const protocol = parsedUrl.protocol;
+
+  // If partials are not allowed by the rule level, return empty
+  if (!matchingInfo.allowsPartials) {
+    return [];
+  }
+
+  try {
+    const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+
+    switch (matchLevel) {
+      case 'exact_url': // Should not happen if allowsPartials is false, but handle defensively
+      case 'custom_exact': // Should not happen if allowsPartials is false
+        return []; // No ancestors for exact matches
+
+      case 'domain_partials':
+        // Only include the domain itself as the "ancestor"
+        ancestors.push(`${protocol}//${hostname}`);
+        break;
+
+      case 'path1_partials':
+      case 'path2_partials':
+      case 'path3_partials':
+        const level = parseInt(matchLevel.charAt(4)); // Extract 1, 2, or 3
+        // Add ancestors from the specified level up to the domain
+        for (let i = level; i >= 0; i--) {
+          if (pathSegments.length >= i) {
+            const ancestorPath = (i > 0) ? ('/' + pathSegments.slice(0, i).join('/')) : ''; // Empty path for domain level
+            ancestors.push(`${protocol}//${hostname}${ancestorPath}`);
+          }
+        }
+        break;
+
+      case 'custom_partials':
+        if (rule?.pattern) {
+          // Use the pattern-based generator for custom partials
+          return generateUrlFromCustomPattern(parsedUrl, rule.pattern);
+        } else {
+          // Fallback to domain if pattern is missing (shouldn't happen)
+          logWarn(`Custom_partials rule for ${hostname} is missing a pattern.`);
+          ancestors.push(`${protocol}//${hostname}`);
+        }
+        break;
+
+      default:
+        // Fallback for unknown partial levels: domain only
+        logWarn(`Unknown partial matchLevel '${matchLevel}', falling back to domain ancestor.`);
+        ancestors.push(`${protocol}//${hostname}`);
+        break;
+    }
+  } catch (error) {
+    logError(`Error generating ancestors for ${parsedUrl.href} with rule ${matchLevel}:`, error);
+    // Fallback to domain only on error
+    ancestors.push(`${protocol}//${hostname}`);
+  }
+
+  // Return unique ancestors
+  return Array.from(new Set(ancestors));
+}
+
+// Old function, kept for reference or potential fallback, but should be replaced
 async function generateCustomAncestorUrls(url, matchingInfo) {
+  // THIS FUNCTION IS LARGELY REPLACED BY generateAncestorsBasedOnRule
+  // Kept temporarily for careful review / migration if needed
   const { matchLevel, rule } = matchingInfo;
   if (!matchLevel || matchLevel === 'disabled') {
     return []; // No ancestors if matching is disabled
@@ -1128,14 +1216,14 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
     const ancestors = [];
     
     // Handle custom pattern matching
-    if (matchLevel === 'custom' && rule.pattern) {
+    if (matchLevel === 'custom' && rule.pattern) { // NOTE: Old 'custom' level
       return generateUrlFromCustomPattern(parsed, rule.pattern);
     }
     
     // Determine how many path segments to keep based on match level
     let pathSegmentsToKeep = 0;
     
-    switch (matchLevel) {
+    switch (matchLevel) { // NOTE: References old levels
       case 'domain':
         // Only match the domain, no path segments
         ancestors.push(`${parsed.protocol}//${hostname}`);
@@ -1159,7 +1247,8 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
       default:
         // Default case - just consider full path
         logDebug(`Unknown match level ${matchLevel}, using default ancestor generation`);
-        return generateAncestorUrls(url);
+        // return generateAncestorUrls(url); // Recursive call risk
+        return [`${parsed.protocol}//${parsed.hostname}`]; // Safer default
     }
     
     // Generate ancestor with specified path segments
@@ -1175,7 +1264,8 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
     
   } catch (error) {
     logError(`Error generating custom ancestors for ${url}:`, error);
-    return generateAncestorUrls(url); // Fall back to default method on error
+    // return generateAncestorUrls(url); // Recursive call risk
+    return [`${new URL(url).protocol}//${new URL(url).hostname}`]; // Safer fallback
   }
 }
 

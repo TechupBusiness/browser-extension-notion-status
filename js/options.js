@@ -155,62 +155,61 @@ const DEFAULT_DOMAIN_RULES = [
   // Regular domain rules
   {
     domain: 'github.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/*/repo*',
     description: 'Match at repository level (github.com/user/repo)'
   },
   {
     domain: 'gitlab.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/*/project*',
     description: 'Match at repository level (gitlab.com/user/repo)'
   },
   {
     domain: 'reddit.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/r/*/comments/*/*',
     description: 'Match at thread level (exclude comments and pagination)'
   },
   {
     domain: 'twitter.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/*',
     description: 'Match at profile level (twitter.com/username)'
   },
   {
     domain: 'x.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/*',
     description: 'Match at profile level (x.com/username)'
   },
   {
     domain: 'youtube.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_exact',
     pattern: '/watch?v=*',
-    description: 'Match at video level (youtube.com/watch?v=ID)',
-    matchOnlySelf: true
+    description: 'Match at video level only (youtube.com/watch?v=ID)'
   },
   {
     domain: 'stackoverflow.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/questions/*',
     description: 'Match at question level (exclude answers and pagination)'
   },
   {
     domain: 'linkedin.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/in/*',
     description: 'Match at profile level (linkedin.com/in/username)'
   },
   {
     domain: 'amazon.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/dp/*',
     description: 'Match at product level (exclude reviews and pagination)'
   },
   {
     domain: 'medium.com',
-    matchLevel: 'custom',
+    matchLevel: 'custom_partials',
     pattern: '/@*/*',
     description: 'Match at article level (exclude comments)'
   }
@@ -218,12 +217,14 @@ const DEFAULT_DOMAIN_RULES = [
 
 // Match level options for domains
 const MATCH_LEVEL_OPTIONS = [
-  { value: 'disabled', label: 'Disable completely', description: 'No partial matching for this domain' },
-  { value: 'domain', label: 'Domain only', description: 'Match only at domain level (example.com)' },
-  { value: 'path1', label: 'First path level', description: 'Match first path level (example.com/first)' },
-  { value: 'path2', label: 'Second path level', description: 'Match second path level (example.com/first/second)' },
-  { value: 'path3', label: 'Third path level', description: 'Match third path level (example.com/first/second/third)' },
-  { value: 'custom', label: 'Custom pattern', description: 'Define a custom pattern to match URLs' }
+  { value: 'disabled', label: 'Disabled', description: 'No status checks for this domain.' },
+  { value: 'exact_url', label: 'Exact URL Only', description: 'Match only exact variations (http/s, www). No partials (No Orange status).' },
+  { value: 'domain_partials', label: 'Domain (Allow Partials)', description: 'Match domain level and path variations (e.g., example.com/*).'},
+  { value: 'path1_partials', label: 'Path Level 1 (Allow Partials)', description: 'Match first path level and deeper variations (e.g., example.com/p1/*).' },
+  { value: 'path2_partials', label: 'Path Level 2 (Allow Partials)', description: 'Match second path level and deeper variations (e.g., example.com/p1/p2/*).' },
+  { value: 'path3_partials', label: 'Path Level 3 (Allow Partials)', description: 'Match third path level and deeper variations (e.g., example.com/p1/p2/p3/*).' },
+  { value: 'custom_exact', label: 'Custom Pattern (Exact Only)', description: 'Define a specific URL pattern to match exactly. No partials (No Orange status).', requiresPattern: true },
+  { value: 'custom_partials', label: 'Custom Pattern (Allow Partials)', description: 'Define a URL pattern to match itself and deeper variations.', requiresPattern: true }
 ];
 
 // DOM Elements
@@ -797,39 +798,44 @@ function addDomainRuleToUI(rule, index) {
     matchLevelSelect.appendChild(optionElement);
   });
   
+  // Description text (moved up)
+  const descriptionDiv = document.createElement('div');
+  descriptionDiv.className = 'domain-rule-description';
+  descriptionDiv.textContent = rule.description || getDescriptionForMatchLevel(rule.matchLevel);
+  content.appendChild(descriptionDiv); // Append description right after the select
+
   // Custom pattern input (shown only when custom pattern is selected)
+  const selectedOption = MATCH_LEVEL_OPTIONS.find(opt => opt.value === rule.matchLevel);
+  const needsPattern = selectedOption?.requiresPattern || false;
+
   const patternLabel = document.createElement('label');
   patternLabel.textContent = 'Pattern:';
   patternLabel.htmlFor = `pattern-input-${index}`;
-  patternLabel.style.display = rule.matchLevel === 'custom' ? 'block' : 'none';
+  patternLabel.style.display = needsPattern ? 'block' : 'none';
   
   const patternInput = document.createElement('input');
   patternInput.type = 'text';
   patternInput.id = `pattern-input-${index}`;
   patternInput.value = rule.pattern || '';
   patternInput.placeholder = '/path/*/wildcard or /path?with=querystring';
-  patternInput.style.display = rule.matchLevel === 'custom' ? 'block' : 'none';
+  patternInput.style.display = needsPattern ? 'block' : 'none';
   
   // Pattern helper text
   const patternHelp = document.createElement('div');
   patternHelp.className = 'domain-rule-description';
   patternHelp.textContent = 'Use * as wildcard for path segments. Example: /users/*/repos matches any username. Add query parameters with ?param=value.';
-  patternHelp.style.display = rule.matchLevel === 'custom' ? 'block' : 'none';
+  patternHelp.style.display = needsPattern ? 'block' : 'none';
   
   // Show/hide pattern input when match level changes
   matchLevelSelect.addEventListener('change', (e) => {
-    const selectedLevel = e.target.value;
-    const isCustom = selectedLevel === 'custom';
+    const selectedLevelValue = e.target.value;
+    const selectedOpt = MATCH_LEVEL_OPTIONS.find(opt => opt.value === selectedLevelValue);
+    const isCustom = selectedOpt?.requiresPattern || false;
     patternLabel.style.display = isCustom ? 'block' : 'none';
     patternInput.style.display = isCustom ? 'block' : 'none';
     patternHelp.style.display = isCustom ? 'block' : 'none';
-    descriptionDiv.textContent = isCustom ? 'Custom pattern matching for this domain' : getDescriptionForMatchLevel(selectedLevel);
+    descriptionDiv.textContent = getDescriptionForMatchLevel(selectedLevelValue); // Update description
   });
-  
-  // Description text
-  const descriptionDiv = document.createElement('div');
-  descriptionDiv.className = 'domain-rule-description';
-  descriptionDiv.textContent = rule.description || getDescriptionForMatchLevel(rule.matchLevel);
   
   // Add everything to the content div
   content.appendChild(domainLabel);
@@ -839,30 +845,6 @@ function addDomainRuleToUI(rule, index) {
   content.appendChild(patternLabel);
   content.appendChild(patternInput);
   content.appendChild(patternHelp);
-  content.appendChild(descriptionDiv);
-  
-  // Add Strict Match Only checkbox
-  const strictMatchDiv = document.createElement('div');
-  strictMatchDiv.className = 'input-group checkbox-group'; // Use similar styling if needed
-  strictMatchDiv.style.marginTop = '10px';
-
-  const strictMatchCheckbox = document.createElement('input');
-  strictMatchCheckbox.type = 'checkbox';
-  strictMatchCheckbox.id = `match-only-self-checkbox-${index}`;
-  strictMatchCheckbox.checked = rule.matchOnlySelf || false; // Set initial state
-  strictMatchCheckbox.style.width = 'auto';
-  strictMatchCheckbox.style.marginRight = '8px';
-
-  const strictMatchLabel = document.createElement('label');
-  strictMatchLabel.htmlFor = strictMatchCheckbox.id;
-  strictMatchLabel.textContent = 'Strict Match Only (No Orange Status for partial matches)';
-  strictMatchLabel.style.fontWeight = 'normal'; // Override potential bold from .input-group label
-  strictMatchLabel.style.flexBasis = 'auto';
-  strictMatchLabel.style.textAlign = 'left';
-
-  strictMatchDiv.appendChild(strictMatchCheckbox);
-  strictMatchDiv.appendChild(strictMatchLabel);
-  content.appendChild(strictMatchDiv);
   
   // Add header and content to the rule div
   domainRule.appendChild(header);
@@ -882,7 +864,7 @@ function handleAddDomainRule() {
   const newRule = {
     domain: '',
     matchLevel: 'disabled',
-    description: 'No partial matching for this domain'
+    description: getDescriptionForMatchLevel('disabled') // Use helper
   };
   
   // Get current domain rules
@@ -935,15 +917,13 @@ function getCurrentDomainRules() {
     const domainInput = ruleElement.querySelector(`#domain-input-${index}`);
     const matchLevelSelect = ruleElement.querySelector(`#match-level-select-${index}`);
     const patternInput = ruleElement.querySelector(`#pattern-input-${index}`);
-    const descriptionDiv = ruleElement.querySelector('.domain-rule-description:last-child'); // Assuming the last one is the generated desc
-    const strictMatchCheckbox = ruleElement.querySelector(`#match-only-self-checkbox-${index}`); // Find the checkbox
+    const descriptionDiv = ruleElement.querySelector('.domain-rule-description:first-of-type'); // Get the description div added earlier
     
     domainRules.push({
       domain: domainInput.value.trim(),
       matchLevel: matchLevelSelect.value,
       pattern: patternInput ? patternInput.value.trim() : '',
-      description: descriptionDiv ? descriptionDiv.textContent : '', // Use generated description
-      matchOnlySelf: strictMatchCheckbox ? strictMatchCheckbox.checked : false // Get checkbox state
+      description: descriptionDiv ? descriptionDiv.textContent : getDescriptionForMatchLevel(matchLevelSelect.value), // Use helper as fallback
     });
   });
   
@@ -1028,7 +1008,8 @@ async function handleSaveSettings() {
         throw new Error('Please select a URL property');
       }
       if (!lastEditedPropertyName) {
-          throw new Error('Please select a Last Edited Time property for delta sync');
+          // Allow saving without last edited property, but maybe show warning?
+          // For now, just allow it, sync will fallback or be disabled.
       }
     }
     
@@ -1066,6 +1047,9 @@ async function handleSaveSettings() {
         dataToSave.lastEditedPropertyName = lastEditedPropertyName;
     }
     
+    // Check if lastEditedPropertyName changed independently to reschedule alarm
+    const lastEditedChanged = oldSettings.lastEditedPropertyName !== lastEditedPropertyName;
+
     // Save settings
     await chrome.storage.local.set(dataToSave);
     
@@ -1076,7 +1060,7 @@ async function handleSaveSettings() {
         displayStatus('cache-action-status', 'Database settings changed, triggering full sync...', 'info', 10000);
         // Don't await this, let it run in background
         chrome.runtime.sendMessage({ action: 'forceFullSync' }).catch(err => console.error("Error triggering sync after save:", err));
-     } else if (oldSettings.cacheDuration !== cacheDuration || oldSettings.lastEditedPropertyName !== lastEditedPropertyName) {
+     } else if (oldSettings.cacheDuration !== cacheDuration || lastEditedChanged) { // Use the new flag
          // Reschedule alarm if cache duration or lastEditedProperty changed
          displayStatus('cache-action-status', 'Rescheduling background sync...', 'info');
          chrome.runtime.sendMessage({ action: 'rescheduleSyncAlarm' }).catch(err => console.error("Error rescheduling sync alarm:", err));
