@@ -138,17 +138,22 @@ async function checkCurrentUrl(url, cacheOnly = false) {
       await setIconState('GRAY', { text: 'URL excluded by domain rules.', domainExcluded: true });
       return; // Exit early if domain is excluded
     }
+    const matchOnlySelf = (typeof domainRuleInfo === 'object' && domainRuleInfo.matchOnlySelf) || false;
 
     // --- 2. Generate URLs to Check (Variations + Ancestors/Partials) ---
     const exactVariations = generateExactMatchVariations(url);
     let ancestorPartials = [];
-    if (domainRuleInfo === true) { 
-        ancestorPartials = generateAncestorUrls(url); 
-    } else if (typeof domainRuleInfo === 'object') { 
-        ancestorPartials = await generateCustomAncestorUrls(url, domainRuleInfo);
+    if (!matchOnlySelf) {
+        if (domainRuleInfo === true) { 
+            ancestorPartials = generateAncestorUrls(url); 
+        } else if (typeof domainRuleInfo === 'object') { 
+            ancestorPartials = await generateCustomAncestorUrls(url, domainRuleInfo);
+        }
+    } else {
+        logDebug(`[URL Check] Skipping ancestor/partial generation for ${url} due to matchOnlySelf rule.`);
     }
     const allUrlsToCheck = Array.from(new Set([...exactVariations, ...ancestorPartials]));
-    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs to check in cache:`, allUrlsToCheck);
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs to check (matchOnlySelf=${matchOnlySelf}):`, allUrlsToCheck);
 
     // --- 3. Check Cache --- 
     const cachePromises = allUrlsToCheck.map(u => checkCache(u, config.cacheDuration));
@@ -232,43 +237,56 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                      return;
                 }
 
-                // Reuse the ancestor/partial matching logic, comparing `url` against `validGreenUrls`
+                // Perform aggressive check (respect matchOnlySelf)
                 let aggressiveMatchFound = false;
                 const aggressiveMatchingUrls = new Set();
-                const currentUrlAncestors = typeof domainRuleInfo === 'object' 
-                    ? await generateCustomAncestorUrls(url, domainRuleInfo) 
-                    : generateAncestorUrls(url);
-                // Add the exact URL variations to the list we check against cached greens
-                const urlsToCheckAggressively = Array.from(new Set([...generateExactMatchVariations(url), ...currentUrlAncestors]));
 
+                // Generate relevant check URLs based on matchOnlySelf
+                const urlsToCheckAggressively = [...exactVariations];
+                if (!matchOnlySelf) {
+                    const currentUrlAncestors = typeof domainRuleInfo === 'object' 
+                        ? await generateCustomAncestorUrls(url, domainRuleInfo) 
+                        : generateAncestorUrls(url);
+                    urlsToCheckAggressively.push(...currentUrlAncestors);
+                } 
+                const uniqueUrlsToCheckAggressively = Array.from(new Set(urlsToCheckAggressively));
+
+                logDebug("[CacheOnly][Aggressive] URLs to check aggressively:", uniqueUrlsToCheckAggressively);
+
+                // Loop through cached green URLs
                 for (const cachedGreenUrl of validGreenUrls) {
                     try {
                         const parsedCachedGreen = new URL(cachedGreenUrl);
-                        // Simple check: Does any ancestor/variation of the current URL match the domain/path of a known GREEN URL?
-                        for (const checkUrl of urlsToCheckAggressively) {
+                        // Check against the generated list
+                        for (const checkUrl of uniqueUrlsToCheckAggressively) {
+                            // Avoid matching self if only checking variations
+                            if (matchOnlySelf && checkUrl === cachedGreenUrl) continue; 
+                            
                             const parsedCheckUrl = new URL(checkUrl);
-                             // Compare hostname and path prefix
-                            if (parsedCheckUrl.hostname === parsedCachedGreen.hostname && 
+                             // Compare hostname and path prefix (for partials)
+                            if (!matchOnlySelf && // Only do partial check if allowed
+                                parsedCheckUrl.hostname === parsedCachedGreen.hostname && 
                                 parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
                                 
                                 logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
                                 aggressiveMatchFound = true;
                                 aggressiveMatchingUrls.add(cachedGreenUrl); 
-                                // Don't break here, collect all potential partial matches from cache
                             }
+                            // We don't need an exact match check here because the initial cache check already handled exact GREEN matches.
                         }
                     } catch (e) {
                         logWarn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
                     } 
                 }
 
-                if (aggressiveMatchFound) {
+                // Set state based on aggressive check result
+                if (aggressiveMatchFound) { // Will only be true if !matchOnlySelf
                     const finalMatches = Array.from(aggressiveMatchingUrls);
                     logInfo("[CacheOnly][Aggressive] Final state: ORANGE (determined from cache), matches:", finalMatches);
                     await updateCache(url, 'ORANGE', { matchingUrls: finalMatches });
                     await setIconState('ORANGE', { matchingUrls: finalMatches });
                 } else {
-                    logInfo("[CacheOnly][Aggressive] Final state: RED (no matches found in cached GREEN URLs).");
+                    logInfo("[CacheOnly][Aggressive] Final state: RED (no matches found in cached GREEN URLs or matchOnlySelf=true).");
                     await updateCache(url, 'RED');
                     await setIconState('RED');
                 }
@@ -329,9 +347,8 @@ async function checkCurrentUrl(url, cacheOnly = false) {
             // --- End Bulk Update --- 
         }
 
-        // 5b. Check Ancestors/Partials via API (only if no exact match found)
-        // Use ancestorPartials generated earlier
-        if (ancestorPartials.length > 0) {
+        // 5b. Check Ancestors/Partials via API (only if no exact match found AND !matchOnlySelf)
+        if (!matchOnlySelf && ancestorPartials.length > 0) {
              logInfo("[API Check] Querying API for ancestors/partials:", ancestorPartials);
              const partialApiResultPages = await queryNotionForMultipleUrls(ancestorPartials, config);
 
@@ -370,12 +387,15 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                  }
                  // --- End Bulk Update ---
              }
+        } else if (matchOnlySelf) {
+             logDebug("[API Check] Skipping ancestor/partial API check due to matchOnlySelf rule.");
         }
 
         // 5c. No Matches Found via API (Exact or Partial)
-        logInfo(`[API Check] Final state: RED (no matches found in API)`);
+        // This state is reached if exact check failed AND (partial check failed OR partial check was skipped)
+        logInfo(`[API Check] Final state: RED (no matches found in API for relevant checks)`);
         await setIconState('RED');
-        // Cache entries for exact variations and ancestors/partials were already set to RED above.
+        // Note: RED caching for variations/ancestors already happened inside 5a/5b
         return; 
 
     } catch (error) {
@@ -1005,14 +1025,17 @@ async function shouldDoPartialMatching(url) {
         }
         
         // If we get here, no specific rule for the protocol, try normal URL parsing
-        if (protocol === 'http' || protocol === 'https') {
+        if (!domainForCheck && (protocol === 'http' || protocol === 'https')) {
           try {
             const parsedUrl = new URL(url);
             domainForCheck = parsedUrl.hostname;
           } catch (error) {
             logError(`Error parsing URL: ${url}`, error);
-            domainForCheck = hostname || protocol;
+            domainForCheck = hostname || ''; // Use extracted hostname if parsing fails
           }
+        } else if (!domainForCheck) {
+            // Fallback if still no domain (e.g., data: or other non-standard URLs)
+            domainForCheck = protocol || hostname;
         }
       }
     } else {
@@ -1030,30 +1053,37 @@ async function shouldDoPartialMatching(url) {
     
     // Find the first matching rule for this hostname/protocol
     const matchingRule = domainRules.find(rule => {
-      // Match exact or check if hostname contains the rule's domain
-      return domainForCheck === rule.domain || 
-             (domainForCheck && domainForCheck.includes(rule.domain));
+      // Normalize rule domain for comparison
+      const ruleDomainLower = rule.domain?.toLowerCase();
+      if (!ruleDomainLower) return false;
+      
+      // Check exact match or if domain includes the rule domain (e.g., subdomains)
+      return domainForCheck === ruleDomainLower || 
+             (domainForCheck && domainForCheck.endsWith('.' + ruleDomainLower)); // More robust subdomain check
     });
     
     if (!matchingRule) {
-      // No matching rule, do default partial matching
       logDebug(`No domain rule found for ${domainForCheck}, using default partial matching`);
-      return true;
+      return true; // Default: Allow partial matching, matchOnlySelf is false
     }
     
     // If match level is 'disabled', no partial matching
     if (matchingRule.matchLevel === 'disabled') {
-      logDebug(`Partial matching disabled for ${domainForCheck}`);
+      logDebug(`Partial matching disabled for ${domainForCheck} by rule:`, matchingRule);
       return false;
     }
     
-    // If it got here, we need to do partial matching but with custom rules
-    logDebug(`Using custom partial matching for ${domainForCheck} with level: ${matchingRule.matchLevel}${matchingRule.pattern ? `, pattern: ${matchingRule.pattern}` : ''}`);
-    return { matchLevel: matchingRule.matchLevel, rule: matchingRule };
+    // Return rule info, including matchOnlySelf (defaulting to false)
+    logDebug(`Using custom matching rule for ${domainForCheck}:`, matchingRule);
+    return {
+      matchLevel: matchingRule.matchLevel,
+      rule: matchingRule,
+      matchOnlySelf: matchingRule.matchOnlySelf || false // Extract the new property
+    };
     
   } catch (error) {
     logError(`Error checking domain rules for ${url}:`, error);
-    return true; // Default to true on error
+    return true; // Default to true (allow partials, matchOnlySelf=false) on error
   }
 }
 

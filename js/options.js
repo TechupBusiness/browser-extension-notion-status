@@ -187,7 +187,8 @@ const DEFAULT_DOMAIN_RULES = [
     domain: 'youtube.com',
     matchLevel: 'custom',
     pattern: '/watch?v=*',
-    description: 'Match at video level (youtube.com/watch?v=ID)'
+    description: 'Match at video level (youtube.com/watch?v=ID)',
+    matchOnlySelf: true
   },
   {
     domain: 'stackoverflow.com',
@@ -838,6 +839,29 @@ function addDomainRuleToUI(rule, index) {
   content.appendChild(patternHelp);
   content.appendChild(descriptionDiv);
   
+  // Add Strict Match Only checkbox
+  const strictMatchDiv = document.createElement('div');
+  strictMatchDiv.className = 'input-group checkbox-group'; // Use similar styling if needed
+  strictMatchDiv.style.marginTop = '10px';
+
+  const strictMatchCheckbox = document.createElement('input');
+  strictMatchCheckbox.type = 'checkbox';
+  strictMatchCheckbox.id = `match-only-self-checkbox-${index}`;
+  strictMatchCheckbox.checked = rule.matchOnlySelf || false; // Set initial state
+  strictMatchCheckbox.style.width = 'auto';
+  strictMatchCheckbox.style.marginRight = '8px';
+
+  const strictMatchLabel = document.createElement('label');
+  strictMatchLabel.htmlFor = strictMatchCheckbox.id;
+  strictMatchLabel.textContent = 'Strict Match Only (No Orange Status for partial matches)';
+  strictMatchLabel.style.fontWeight = 'normal'; // Override potential bold from .input-group label
+  strictMatchLabel.style.flexBasis = 'auto';
+  strictMatchLabel.style.textAlign = 'left';
+
+  strictMatchDiv.appendChild(strictMatchCheckbox);
+  strictMatchDiv.appendChild(strictMatchLabel);
+  content.appendChild(strictMatchDiv);
+  
   // Add header and content to the rule div
   domainRule.appendChild(header);
   domainRule.appendChild(content);
@@ -905,16 +929,19 @@ function getCurrentDomainRules() {
   const domainRuleElements = elements.domainExclusionList.querySelectorAll('.domain-rule');
   
   domainRuleElements.forEach(ruleElement => {
-    const domainInput = ruleElement.querySelector('input[type="text"][id^="domain-input-"]');
-    const matchLevelSelect = ruleElement.querySelector('select');
-    const patternInput = ruleElement.querySelector('input[type="text"][id^="pattern-input-"]');
-    const descriptionDiv = ruleElement.querySelector('.domain-rule-description:last-child');
+    const index = parseInt(ruleElement.dataset.index, 10); // Get index for unique IDs
+    const domainInput = ruleElement.querySelector(`#domain-input-${index}`);
+    const matchLevelSelect = ruleElement.querySelector(`#match-level-select-${index}`);
+    const patternInput = ruleElement.querySelector(`#pattern-input-${index}`);
+    const descriptionDiv = ruleElement.querySelector('.domain-rule-description:last-child'); // Assuming the last one is the generated desc
+    const strictMatchCheckbox = ruleElement.querySelector(`#match-only-self-checkbox-${index}`); // Find the checkbox
     
     domainRules.push({
       domain: domainInput.value.trim(),
       matchLevel: matchLevelSelect.value,
       pattern: patternInput ? patternInput.value.trim() : '',
-      description: descriptionDiv.textContent
+      description: descriptionDiv ? descriptionDiv.textContent : '', // Use generated description
+      matchOnlySelf: strictMatchCheckbox ? strictMatchCheckbox.checked : false // Get checkbox state
     });
   });
   
