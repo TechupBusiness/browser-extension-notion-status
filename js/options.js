@@ -247,6 +247,7 @@ const elements = {
   domainExclusionList: document.getElementById('domain-exclusion-list'),
   addDomainRuleButton: document.getElementById('add-domain-rule-button'),
   resetDefaultDomainsButton: document.getElementById('reset-default-domains-button'),
+  domainFilterInput: document.getElementById('domain-filter-input'),
   
   // Cache
   cacheDuration: document.getElementById('cache-duration'),
@@ -350,6 +351,7 @@ function setupEventListeners() {
   // Domain Exclusion
   elements.addDomainRuleButton.addEventListener('click', handleAddDomainRule);
   elements.resetDefaultDomainsButton.addEventListener('click', handleResetDefaultDomains);
+  elements.domainFilterInput.addEventListener('input', handleDomainFilter);
   
   // Cache
   elements.clearCacheButton.addEventListener('click', handleClearCache);
@@ -1096,6 +1098,23 @@ function calculateCacheDuration() {
   }
   
   return cacheDurationValue * cacheDurationUnit;
+}
+
+// New Filter Function
+function handleDomainFilter() {
+    const filterText = elements.domainFilterInput.value.toLowerCase().trim();
+    const domainRuleElements = elements.domainExclusionList.querySelectorAll('.domain-rule');
+
+    domainRuleElements.forEach(ruleElement => {
+        const titleElement = ruleElement.querySelector('.domain-rule-title');
+        const domainText = titleElement ? titleElement.textContent.toLowerCase() : '';
+        
+        if (domainText.includes(filterText)) {
+            ruleElement.style.display = ''; // Show if matches
+        } else {
+            ruleElement.style.display = 'none'; // Hide if doesn't match
+        }
+    });
 }
 
 // Initialize the options page
