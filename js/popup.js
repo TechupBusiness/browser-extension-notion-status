@@ -284,7 +284,7 @@ function updateStatusUI(state, text) {
   // Apply new state
   elements.statusCard.classList.add(safeState); // e.g., 'green', 'red', 'orange', 'gray'
   elements.statusIcon.classList.add(safeState);
-  elements.statusIcon.textContent = safeState === 'gray' ? '!' : (safeState === 'orange' ? '~~' : 'N'); // Use different icons
+  elements.statusIcon.textContent = 'N'; // Always display 'N'
   elements.statusText.textContent = text;
 
   // Re-add click listener for ORANGE state to toggle list (if desired)
