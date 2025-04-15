@@ -281,19 +281,29 @@ function displayStatus(targetElementId, message, type, duration = 5000) {
     // Clear existing timer for this specific target if it exists
     if (statusTimers[targetElementId]) {
         clearTimeout(statusTimers[targetElementId]);
+        delete statusTimers[targetElementId]; // Remove the timer reference immediately
     }
 
     statusElement.textContent = message;
     statusElement.className = 'status local-status ' + type; // Ensure base classes are present
     statusElement.style.display = 'block'; // Make sure it's visible
 
-    // Set a new timer to hide/clear the message
-    statusTimers[targetElementId] = setTimeout(() => {
-        statusElement.textContent = '';
-        statusElement.className = 'status local-status'; // Reset classes
-        statusElement.style.display = 'none'; // Hide it
-        delete statusTimers[targetElementId]; // Remove timer reference
-    }, duration);
+    // Set a new timer ONLY if duration is positive
+    if (duration > 0) {
+        statusTimers[targetElementId] = setTimeout(() => {
+            // Check if the element still exists and if the timer is still the current one
+            // This prevents errors if the element is removed or another message overwrites this one quickly
+            const currentElement = document.getElementById(targetElementId);
+            if (currentElement && statusTimers[targetElementId]) { 
+                currentElement.textContent = '';
+                currentElement.className = 'status local-status'; // Reset classes
+                currentElement.style.display = 'none'; // Hide it
+            }
+            // Always delete the timer reference after execution
+            delete statusTimers[targetElementId]; 
+        }, duration);
+    } 
+    // No 'else' needed, timer is already deleted if it existed
 }
 
 // Initialize the options page
@@ -949,7 +959,8 @@ async function handleClearCache() {
 
 // Handle force full sync button
 async function handleForceFullSync() {
-    // Confirmation dialog
+    // Confirmation dialog removed
+    /*
     const confirmSync = confirm(
         "This will clear your local cache and fetch ALL URLs from your selected Notion database.\n\n" +
         "This can take a while for large databases and will use Notion API requests.\n\n" +
@@ -957,36 +968,37 @@ async function handleForceFullSync() {
     );
 
     if (!confirmSync) {
-        displayStatus('cache-action-status', 'Full sync cancelled by user.', 'info');
+        displayStatus('sync-action-status', 'Full sync cancelled by user.', 'info');
         return; // Stop if user cancels
     }
+    */
 
     const button = elements.forceFullSyncButton;
     // Disable button and show loading state
     button.disabled = true;
     button.classList.add('loading');
-    displayStatus('cache-action-status', 'Clearing cache and triggering full sync... This may take some time.', 'info', 15000); // Longer duration
+    // Show persistent 'in progress' message in the new sync status area
+    displayStatus('sync-action-status', 'Clearing cache and triggering full sync... This may take some time.', 'info', 0); 
 
     try {
-        // ---- Step 1: Clear the cache first ----
+        // ---- Step 1: Clear the cache first (uses cache-action-status)
         await handleClearCache(); // Wait for cache clear to complete
-        logInfo('Cache cleared before starting full sync.'); // Using hypothetical logInfo
 
         // ---- Step 2: Send message to background script ----
         const result = await chrome.runtime.sendMessage({ action: 'forceFullSync' });
         
-        // ---- Step 3: Handle response ----
+        // ---- Step 3: Handle response (Update sync-action-status)
         if (result && result.success) {
-            displayStatus('cache-action-status', `Full sync complete. Processed ${result.pagesProcessed || 0} pages. Updated ${result.urlsUpdated || 0} URLs.`, 'success');
+            displayStatus('sync-action-status', `Full sync complete. Processed ${result.pagesProcessed || 0} pages. Updated ${result.urlsUpdated || 0} URLs.`, 'success');
         } else if (result) {
-            displayStatus('cache-action-status', `Sync failed: ${result.error || 'Unknown error'}`, 'error');
+            displayStatus('sync-action-status', `Sync failed: ${result.error || 'Unknown error'}`, 'error');
         } else {
-             displayStatus('cache-action-status', 'Sync failed: No response from background script.', 'error');
+             displayStatus('sync-action-status', 'Sync failed: No response from background script.', 'error');
         }
 
     } catch (error) {
         console.error('Error during forceFullSync process:', error);
-        displayStatus('cache-action-status', `Error triggering sync: ${error.message}`, 'error');
+        displayStatus('sync-action-status', `Error triggering sync: ${error.message}`, 'error');
     } finally {
         // Re-enable button and remove loading state regardless of outcome
         button.disabled = false;
