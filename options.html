@@ -85,6 +85,7 @@
           <div style="flex-grow: 1;">
               <button id="clear-cache-button" class="button">Clear Cache</button>
               <small class="hint" style="display: block; margin-left: 0; margin-top: 5px;">Remove all locally stored URL statuses. Does not affect Notion data.</small>
+              <div class="status local-status" id="cache-action-status" style="margin-left: 0; margin-top: 5px;"></div>
           </div>
       </div>
       
@@ -94,12 +95,8 @@
           <div style="flex-grow: 1;">
               <button type="button" id="force-full-sync-button" class="button button-primary" disabled>Force Full Sync</button>
               <small class="hint sync-hint" style="display: block; margin-left: 0; margin-top: 5px;">Clear cache & fetch all URLs from Notion. Use for setup or if sync is broken.</small>
+              <div class="status local-status" id="sync-action-status" style="margin-left: 0; margin-top: 5px;"></div>
           </div>
-      </div>
-      
-      <div class="input-group">
-          <div style="flex-basis: 150px; text-align: right;"></div> <!-- Spacer -->
-          <div class="status local-status" id="cache-action-status" style="margin-left: 0; flex-grow: 1;"></div>
       </div>
       
       <!-- Add Aggressive Caching Toggle -->
