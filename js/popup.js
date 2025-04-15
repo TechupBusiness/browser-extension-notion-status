@@ -10,7 +10,7 @@ const elements = {
   databaseName: document.getElementById('database-name'),
   propertyName: document.getElementById('property-name'),
   lastChecked: document.getElementById('last-checked'),
-  refreshButton: document.getElementById('refresh-button'),
+  topRefreshButton: document.getElementById('top-refresh-button'),
   optionsButton: document.getElementById('options-button'),
   setupButton: document.getElementById('setup-button'),
   // New elements for partial matches
@@ -21,8 +21,8 @@ const elements = {
 // Initialize the popup
 async function init() {
   // Show loading state immediately
-  elements.statusText.textContent = 'Refreshing status...';
-  elements.lastChecked.textContent = 'Now';
+  elements.statusText.textContent = 'Loading status...';
+  elements.lastChecked.textContent = '-';
   
   // Notify background script that popup is opened
   chrome.runtime.sendMessage({ action: 'popupOpened' });
@@ -56,31 +56,18 @@ async function init() {
   
   // Get current URL
   const url = await getCurrentUrl();
-  elements.url.textContent = url;
+  elements.url.textContent = url || 'Unknown URL';
   
   // Update info sections
   await updateDatabaseInfo(settings);
   
-  // Trigger a fresh check when popup is opened
-  try {
-    // Trigger a fresh check (with API calls if needed)
-    await chrome.runtime.sendMessage({ action: 'checkUrl', url: url });
-    
-    // Wait a short moment for the background script to update status
-    await new Promise(resolve => setTimeout(resolve, 500)); 
-    
-    // Load and display the updated status
-    await loadAndDisplayStatus(url);
-  } catch (error) {
-    console.error('Error refreshing status on popup open:', error);
-    updateStatusUI('gray', 'Error refreshing status');
-    elements.lastChecked.textContent = 'Error';
-  }
+  // Load and display the last known status immediately
+  await loadAndDisplayStatus(url);
 }
 
 // Set up event listeners
 function setupEventListeners() {
-  elements.refreshButton.addEventListener('click', handleRefresh);
+  elements.topRefreshButton.addEventListener('click', handleRefresh);
   elements.optionsButton.addEventListener('click', handleOptions);
   elements.setupButton.addEventListener('click', handleOptions);
   
@@ -329,7 +316,7 @@ function togglePartialMatches() {
 // Handle refresh button click
 async function handleRefresh() {
   elements.statusText.textContent = 'Refreshing...';
-  elements.lastChecked.textContent = 'Now';
+  elements.lastChecked.textContent = 'Checking now...';
   elements.partialMatchesContainer.style.display = 'none'; // Hide list on refresh
   elements.statusIcon.removeEventListener('click', togglePartialMatches); // Remove listener
 
@@ -347,7 +334,7 @@ async function handleRefresh() {
     
   } catch (error) { // Use different variable name
     console.error('Error during refresh:', error);
-    updateStatusUI('GRAY', 'Error refreshing status');
+    updateStatusUI('GRAY', `Error: ${error.message || 'Unknown'}`);
     elements.lastChecked.textContent = 'Error';
     // Handle potential communication errors with background script
     if (error.message?.includes('Could not establish connection')) {

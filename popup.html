@@ -11,9 +11,16 @@
       margin: 0;
     }
     
+    .header-container { /* New style for header */
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px; /* Add some space below header */
+    }
+
     h1 {
       font-size: 18px;
-      margin-top: 0;
+      margin: 0; /* Remove default margin */
       color: #2e3440;
     }
     
@@ -92,7 +99,7 @@
     
     .actions {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-end; /* Align remaining buttons to the right */
       margin-top: 15px;
     }
     
@@ -118,6 +125,21 @@
     button#options-button:hover {
       background-color: #4c6f94;
     }
+
+    button.icon-button { /* Style for icon button */
+      background: none;
+      border: none;
+      font-size: 18px; /* Adjust size as needed */
+      cursor: pointer;
+      padding: 0 5px; /* Adjust padding */
+      color: #4c566a;
+      line-height: 1; /* Prevent extra spacing */
+    }
+    
+    button.icon-button:hover {
+      color: #3b4252;
+      background: none; /* Ensure no background on hover */
+    }
     
     .not-configured {
       text-align: center;
@@ -133,7 +155,10 @@
   </style>
 </head>
 <body>
-  <h1>Notion Status</h1>
+  <div class="header-container"> <!-- New container for header -->
+    <h1>Notion Status</h1>
+    <button id="top-refresh-button" class="icon-button" title="Refresh Status">&#x21bb;</button> <!-- New refresh button -->
+  </div>
   
   <div id="status-container">
     <div id="loading">Loading status...</div>
@@ -161,7 +186,7 @@
       </div>
 
       <div class="actions">
-        <button id="refresh-button">Check Now</button>
+        <!-- <button id="refresh-button">Check Now</button> Removed -->
         <button id="options-button">Options</button>
       </div>
     </div>
