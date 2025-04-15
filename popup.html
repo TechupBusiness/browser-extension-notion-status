@@ -101,6 +101,11 @@
       display: flex;
       justify-content: flex-end; /* Align remaining buttons to the right */
       margin-top: 15px;
+      align-items: center; /* Vertically align items */
+    }
+    
+    .notion-links {
+      margin-right: auto; /* Push the options button to the right */
     }
     
     button {
@@ -141,6 +146,29 @@
       background: none; /* Ensure no background on hover */
     }
     
+    /* Styles for Notion link buttons */
+    .action-button, .notion-link-button {
+      margin-right: 8px;
+      background-color: #4c566a;
+      color: white;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background-color 0.2s;
+    }
+    
+    .action-button:hover, .notion-link-button:hover {
+      background-color: #3b4252;
+      color: white;
+      text-decoration: none;
+    }
+    
+    .action-button:last-child, .notion-link-button:last-child {
+      margin-right: 12px; /* Add space between link buttons and Options button */
+    }
+    
     .not-configured {
       text-align: center;
       padding: 20px 0;
@@ -151,6 +179,18 @@
       font-size: 12px;
       padding-left: 20px;
       margin-bottom: 16px;
+    }
+    
+    /* Disabled state for action buttons */
+    .action-button.disabled, .notion-link-button.disabled {
+      background-color: #d8dee9; /* Lighter gray background */
+      color: #6c757d; /* Gray text */
+      cursor: not-allowed;
+      pointer-events: none; /* Disable click events */
+    }
+    
+    .action-button.disabled:hover, .notion-link-button.disabled:hover {
+      background-color: #d8dee9; /* Keep same background on hover */
     }
   </style>
 </head>
@@ -186,7 +226,10 @@
       </div>
 
       <div class="actions">
-        <!-- <button id="refresh-button">Check Now</button> Removed -->
+        <div class="notion-links">
+          <a href="#" id="open-notion-web" class="action-button notion-link-button" title="Open Notion Page in Web" style="display: none;" target="_blank">Web</a>
+          <a href="#" id="open-notion-app" class="action-button notion-link-button" title="Open Notion Page in App" style="display: none;">App</a>
+        </div>
         <button id="options-button">Options</button>
       </div>
     </div>

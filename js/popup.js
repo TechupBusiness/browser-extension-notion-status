@@ -15,7 +15,10 @@ const elements = {
   setupButton: document.getElementById('setup-button'),
   // New elements for partial matches
   partialMatchesContainer: document.getElementById('partial-matches-container'),
-  partialMatchesList: document.getElementById('partial-matches-list')
+  partialMatchesList: document.getElementById('partial-matches-list'),
+  // New buttons
+  openNotionWebButton: document.getElementById('open-notion-web'),
+  openNotionAppButton: document.getElementById('open-notion-app')
 };
 
 // Initialize the popup
@@ -216,16 +219,23 @@ async function loadAndDisplayStatus(currentUrl) {
       console.warn('Could not retrieve currentTabStatus from storage.');
       updateStatusUI('GRAY', 'Status unavailable');
       elements.lastChecked.textContent = 'Unknown';
+      // Ensure buttons are hidden if status is unknown
+      elements.openNotionWebButton.style.display = 'none';
+      elements.openNotionAppButton.style.display = 'none';
       return;
     }
     
-    const { state, text, matchingUrls, timestamp, domainExcluded, error } = currentTabStatus;
+    const { state, text, matchingUrls, timestamp, domainExcluded, error, notionPageUrl } = currentTabStatus;
     let statusText = text || 'Status unavailable'; // Use text from storage if available
     let iconState = state || 'GRAY';
 
     // Clear partial matches list initially
     elements.partialMatchesContainer.style.display = 'none';
     elements.partialMatchesList.innerHTML = '';
+
+    // Hide Notion link buttons initially
+    elements.openNotionWebButton.style.display = 'none';
+    elements.openNotionAppButton.style.display = 'none';
 
     // Override text/state based on conditions if needed
     if (iconState === 'GRAY' && error) {
@@ -240,6 +250,37 @@ async function loadAndDisplayStatus(currentUrl) {
       statusText = 'This URL is not in your Notion database.';
     } else if (iconState === 'GREEN') {
       statusText = 'This URL is in your Notion database.';
+      
+      // Log the status object when GREEN to check for notionPageUrl
+      console.log('CurrentTabStatus when GREEN:', currentTabStatus); 
+      
+      // Make buttons visible for GREEN status
+      elements.openNotionWebButton.style.display = 'inline-block';
+      elements.openNotionAppButton.style.display = 'inline-block';
+      
+      if (notionPageUrl) {
+          // Enable buttons and set correct URLs
+          elements.openNotionWebButton.href = notionPageUrl;
+          elements.openNotionWebButton.classList.remove('disabled');
+          
+          const notionAppUrl = notionPageUrl.replace(/^https?:\/\//, 'notion://');
+          elements.openNotionAppButton.href = notionAppUrl;
+          elements.openNotionAppButton.classList.remove('disabled');
+          
+      } else {
+          // Disable buttons if notionPageUrl is missing
+          console.warn('Status is GREEN but notionPageUrl is missing. Disabling Notion links.');
+          statusText = 'This URL is in your Notion database. (Link unavailable)'; // Update text
+          
+          elements.openNotionWebButton.href = '#'; // Set non-functional href
+          elements.openNotionWebButton.classList.add('disabled');
+          
+          elements.openNotionAppButton.href = '#'; // Set non-functional href
+          elements.openNotionAppButton.classList.add('disabled');
+          
+          // Optionally add the sync button back if needed, or prompt refresh
+          // (Keeping it removed for now as per previous steps)
+      }
     }
 
     updateStatusUI(iconState, statusText); 
@@ -249,13 +290,16 @@ async function loadAndDisplayStatus(currentUrl) {
         const timeAgo = formatTimeAgo(timestamp);
         elements.lastChecked.textContent = domainExcluded ? 'N/A (Excluded)' : timeAgo;
     } else {
-        elements.lastChecked.textContent = domainExcluded ? 'N/A (Excluded)' : 'Unknown';
+        elements.lastChecked.textContent = 'Unknown';
     }
 
-  } catch (err) { // Use different variable name to avoid conflict
-    console.error('Error loading or displaying status:', err);
+  } catch (error) {
+    console.error('Error loading and displaying status:', error);
     updateStatusUI('GRAY', 'Error loading status');
     elements.lastChecked.textContent = 'Error';
+    // Ensure buttons are hidden on error
+    elements.openNotionWebButton.style.display = 'none';
+    elements.openNotionAppButton.style.display = 'none';
   }
 }
 

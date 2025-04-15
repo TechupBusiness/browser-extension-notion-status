@@ -193,9 +193,14 @@ async function checkCurrentUrl(url, cacheOnly = false) {
     // --- 4. Determine Action Based on Cache Results ---
     if (foundGreen) {
         logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: GREEN (from cache)`);
-        await setIconState('GREEN');
+        await setIconState('GREEN', { notionPageUrl: foundGreen.notionPageUrl }); 
         // Optimization: Update cache for all *exact variations* to point to this canonical URL
-        const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', { canonicalUrl: foundGreen.canonicalUrl }));
+        // Ensure we also preserve notionPageUrl if updating cache here
+        const cacheDetailsForVariations = { 
+            canonicalUrl: foundGreen.canonicalUrl, 
+            notionPageUrl: foundGreen.notionPageUrl 
+        };
+        const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', cacheDetailsForVariations));
         await Promise.all(updatePromises);
         return; 
     }
@@ -262,18 +267,24 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                         const parsedCachedGreen = new URL(cachedGreenUrl);
                         // Check against the generated list
                         for (const checkUrl of uniqueUrlsToCheckAggressively) {
-                            // Compare hostname and path prefix (for partials)
-                            if (domainRuleInfo.allowsPartials && // Only do partial check if allowed by rule
-                                parsedCheckUrl.hostname === parsedCachedGreen.hostname &&
-                                parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
-                                // Avoid matching the exact URL itself as a partial (already handled by GREEN check)
-                                if (parsedCheckUrl.href !== parsedCachedGreen.href) {
-                                    logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
-                                    aggressiveMatchFound = true;
-                                    aggressiveMatchingUrls.add(cachedGreenUrl);
+                            // Parse the checkUrl before comparing
+                            try {
+                                const parsedCheckUrl = new URL(checkUrl);
+                                // Compare hostname and path prefix (for partials)
+                                if (domainRuleInfo.allowsPartials && // Only do partial check if allowed by rule
+                                    parsedCheckUrl.hostname === parsedCachedGreen.hostname &&
+                                    parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
+                                    // Avoid matching the exact URL itself as a partial (already handled by GREEN check)
+                                    if (parsedCheckUrl.href !== parsedCachedGreen.href) {
+                                        logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
+                                        aggressiveMatchFound = true;
+                                        aggressiveMatchingUrls.add(cachedGreenUrl);
+                                    }
                                 }
+                            } catch (parseError) {
+                                logWarn(`[CacheOnly][Aggressive] Error parsing checkUrl "${checkUrl}":`, parseError);
+                                continue; // Skip this URL and move to the next one
                             }
-                            // We don't need an exact match check here because the initial cache check already handled exact GREEN matches.
                         }
                     } catch (e) {
                         logWarn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
@@ -319,9 +330,14 @@ async function checkCurrentUrl(url, cacheOnly = false) {
             const canonicalUrlFromApi = firstMatch.properties[config.propertyName]?.url || exactVariations[0]; // Fallback needed?
             logInfo(`[API Check] Final state: GREEN (found via API: ${canonicalUrlFromApi})`);
             
-            await setIconState('GREEN');
+            await setIconState('GREEN', { notionPageUrl: firstMatch.url }); 
             // Update cache for all *exact variations* as GREEN
-            const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', { canonicalUrl: canonicalUrlFromApi }));
+            // Add the actual Notion page URL to the cache details
+            const cacheDetails = { 
+              canonicalUrl: canonicalUrlFromApi, 
+              notionPageUrl: firstMatch.url 
+            };
+            const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', cacheDetails));
             await Promise.all(updatePromises);
             return; 
         } else {
@@ -725,14 +741,20 @@ async function performFullSync() {
         const url = page.properties[config.propertyName]?.url;
         if (url) {
             // Use updateCache to set status to GREEN, overwriting previous status
-            await updateCache(url, 'GREEN', { canonicalUrl: url });
+            await updateCache(url, 'GREEN', { 
+              canonicalUrl: url,
+              notionPageUrl: page.url  // Store the Notion page URL for linking
+            });
             updatedCount++;
           
             // Also update cache for URL variations
             const variations = generateExactMatchVariations(url);
             for (const variation of variations) {
                 // Update variations, ensuring canonicalUrl points to the found URL
-                await updateCache(variation, 'GREEN', { canonicalUrl: url });
+                await updateCache(variation, 'GREEN', { 
+                  canonicalUrl: url,
+                  notionPageUrl: page.url  // Store the Notion page URL for variations too
+                });
             }
         }
       }
@@ -823,13 +845,19 @@ async function performDeltaSync() {
         const url = page.properties[config.propertyName]?.url;
         if (url) {
           // Update cache for this URL - overwrites if RED/ORANGE, updates if GREEN
-          await updateCache(url, 'GREEN', { canonicalUrl: url });
+          await updateCache(url, 'GREEN', { 
+            canonicalUrl: url,
+            notionPageUrl: page.url  // Store the Notion page URL for linking
+          });
           updatedCount++;
           
           // Also update cache for URL variations
           const variations = generateExactMatchVariations(url);
           for (const variation of variations) {
-              await updateCache(variation, 'GREEN', { canonicalUrl: url });
+              await updateCache(variation, 'GREEN', { 
+                canonicalUrl: url,
+                notionPageUrl: page.url  // Store the Notion page URL for variations too
+              });
           }
         }
         // Note: Delta sync doesn't handle deletions. If a page is deleted in Notion,
@@ -1257,7 +1285,7 @@ async function generateCustomAncestorUrls(url, matchingInfo) {
       ancestors.push(`${parsed.protocol}//${hostname}${ancestorPath}`);
     } else {
       // Fallback to domain-only if we couldn't determine path segments
-      ancestors.push(`${parsed.protocol}//${hostname}`);
+      ancestors.push(`${parsed.protocol}//${parsed.hostname}`);
     }
     
     return ancestors;
