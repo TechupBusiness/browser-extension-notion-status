@@ -167,9 +167,9 @@ const DEFAULT_DOMAIN_RULES = [
   },
   {
     domain: 'reddit.com',
-    matchLevel: 'custom_partials',
+    matchLevel: 'custom_exact',
     pattern: '/r/*/comments/*/*',
-    description: 'Match at thread level (exclude comments and pagination)'
+    description: 'Match at thread level only (exclude comments and pagination)'
   },
   {
     domain: 'twitter.com',
@@ -191,9 +191,9 @@ const DEFAULT_DOMAIN_RULES = [
   },
   {
     domain: 'stackoverflow.com',
-    matchLevel: 'custom_partials',
+    matchLevel: 'custom_exact',
     pattern: '/questions/*',
-    description: 'Match at question level (exclude answers and pagination)'
+    description: 'Match at question level only (exclude answers and pagination)'
   },
   {
     domain: 'linkedin.com',
@@ -212,19 +212,22 @@ const DEFAULT_DOMAIN_RULES = [
     matchLevel: 'custom_partials',
     pattern: '/@*/*',
     description: 'Match at article level (exclude comments)'
+  },
+  {
+    domain: 'forum.cursor.com',
+    matchLevel: 'custom_exact',
+    pattern: '/t/*/*',
+    description: 'Match at topic level only (forum.cursor.com/t/topic-name/id)'
   }
 ];
 
 // Match level options for domains
 const MATCH_LEVEL_OPTIONS = [
-  { value: 'disabled', label: 'Disabled', description: 'No status checks for this domain.' },
-  { value: 'exact_url', label: 'Exact URL Only', description: 'Match only exact variations (http/s, www). No partials (No Orange status).' },
-  { value: 'domain_partials', label: 'Domain (Allow Partials)', description: 'Match domain level and path variations (e.g., example.com/*).'},
-  { value: 'path1_partials', label: 'Path Level 1 (Allow Partials)', description: 'Match first path level and deeper variations (e.g., example.com/p1/*).' },
-  { value: 'path2_partials', label: 'Path Level 2 (Allow Partials)', description: 'Match second path level and deeper variations (e.g., example.com/p1/p2/*).' },
-  { value: 'path3_partials', label: 'Path Level 3 (Allow Partials)', description: 'Match third path level and deeper variations (e.g., example.com/p1/p2/p3/*).' },
-  { value: 'custom_exact', label: 'Custom Pattern (Exact Only)', description: 'Define a specific URL pattern to match exactly. No partials (No Orange status).', requiresPattern: true },
-  { value: 'custom_partials', label: 'Custom Pattern (Allow Partials)', description: 'Define a URL pattern to match itself and deeper variations.', requiresPattern: true }
+  { value: 'disabled', label: 'Disabled', description: 'Completely disables Notion status checks for this domain or protocol (e.g., `chrome://`, `localhost`). The icon will always remain Gray.' },
+  { value: 'exact_url', label: 'Exact URL Only', description: 'Checks only the *exact URL* you are visiting (allowing for http/https and www variations). Ignores paths: if you have `domain.com/product/a` in Notion, visiting `domain.com/product` will *not* trigger a check. Prevents Orange status based on other cached pages.' },
+  { value: 'domain_partials', label: 'Domain (Allow Partials)', description: 'Checks *any URL* on this domain. Allows deeper paths to trigger a partial match (Orange icon). Good default for general domains.' },
+  { value: 'custom_exact', label: 'Custom Pattern (Exact Only)', description: 'Checks only URLs matching a specific pattern *exactly*. Other URL structures on the domain are ignored by this rule. Prevents Orange status based on this pattern.', requiresPattern: true },
+  { value: 'custom_partials', label: 'Custom Pattern (Allow Partials)', description: 'Checks URLs matching a specific pattern *and* allows deeper paths to trigger a partial match (Orange icon).', requiresPattern: true }
 ];
 
 // DOM Elements
@@ -833,7 +836,7 @@ function addDomainRuleToUI(rule, index) {
   // Pattern helper text
   const patternHelp = document.createElement('div');
   patternHelp.className = 'domain-rule-description';
-  patternHelp.textContent = 'Use * as wildcard for path segments. Example: /users/*/repos matches any username. Add query parameters with ?param=value.';
+  patternHelp.textContent = 'Use * as a wildcard for single path segments. Example: /users/*/repos/* matches /users/john/repos/my-repo but not /users/john/repos. Use ** for multiple segments. Query params: /path?id=*&type=xyz';
   patternHelp.style.display = needsPattern ? 'block' : 'none';
   
   // Show/hide pattern input when match level changes
