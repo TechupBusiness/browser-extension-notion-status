@@ -949,17 +949,33 @@ async function handleClearCache() {
 
 // Handle force full sync button
 async function handleForceFullSync() {
+    // Confirmation dialog
+    const confirmSync = confirm(
+        "This will clear your local cache and fetch ALL URLs from your selected Notion database.\n\n" +
+        "This can take a while for large databases and will use Notion API requests.\n\n" +
+        "Are you sure you want to proceed?"
+    );
+
+    if (!confirmSync) {
+        displayStatus('cache-action-status', 'Full sync cancelled by user.', 'info');
+        return; // Stop if user cancels
+    }
+
     const button = elements.forceFullSyncButton;
     // Disable button and show loading state
     button.disabled = true;
     button.classList.add('loading');
-    displayStatus('cache-action-status', 'Triggering full sync... This may take some time.', 'info', 15000); // Longer duration for sync message
+    displayStatus('cache-action-status', 'Clearing cache and triggering full sync... This may take some time.', 'info', 15000); // Longer duration
 
     try {
-        // Send message and wait for response
+        // ---- Step 1: Clear the cache first ----
+        await handleClearCache(); // Wait for cache clear to complete
+        logInfo('Cache cleared before starting full sync.'); // Using hypothetical logInfo
+
+        // ---- Step 2: Send message to background script ----
         const result = await chrome.runtime.sendMessage({ action: 'forceFullSync' });
         
-        // Handle response
+        // ---- Step 3: Handle response ----
         if (result && result.success) {
             displayStatus('cache-action-status', `Full sync complete. Processed ${result.pagesProcessed || 0} pages. Updated ${result.urlsUpdated || 0} URLs.`, 'success');
         } else if (result) {
@@ -969,7 +985,7 @@ async function handleForceFullSync() {
         }
 
     } catch (error) {
-        console.error('Error sending forceFullSync message:', error);
+        console.error('Error during forceFullSync process:', error);
         displayStatus('cache-action-status', `Error triggering sync: ${error.message}`, 'error');
     } finally {
         // Re-enable button and remove loading state regardless of outcome

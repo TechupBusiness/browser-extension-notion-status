@@ -374,12 +374,23 @@ button.loading {
   margin-top: 4px;
 }
 
+/* Remove ID-specific background colors, let classes handle it */
 #add-domain-rule-button {
-  background-color: #5e81ac;
+  /* background-color: #5e81ac; */ /* Style handled by .button-primary */
 }
 
 #reset-default-domains-button {
-  background-color: #d08770;
+  /* background-color: #d08770; */ /* Style handled by .button-warning */
+}
+
+/* Define Warning Button Style */
+button.button.button-warning {
+    background-color: #d08770; /* Orange-brown color */
+    color: white;
+}
+
+button.button.button-warning:hover:not(:disabled) {
+    background-color: #c87a60; /* Darker shade on hover */
 }
 
 .remove-domain-button {
@@ -392,4 +403,48 @@ button.loading {
   background-color: #4c566a;
   padding: 4px 8px;
   font-size: 12px;
+}
+
+/* Consolidated Button Styling */
+button.button {
+    padding: 8px 12px; /* Default padding */
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 14px; /* Ensure consistent font size */
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out, box-shadow 0.1s ease;
+    background-color: #d8dee9; /* Default background (light gray) */
+    color: #2e3440; /* Default text color */
+}
+
+button.button:hover:not(:disabled) {
+    background-color: #eceff4; /* Lighter gray on hover */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+button.button:disabled {
+    background-color: #e5e9f0;
+    color: #a8b2c1;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Primary Button Style (Overrides defaults) */
+button.button.button-primary {
+    background-color: #5e81ac; /* Blue color */
+    color: white;
+}
+
+button.button.button-primary:hover:not(:disabled) {
+    background-color: #4c6f94; /* Darker blue on hover */
+}
+
+/* Loading state for any button */
+button.button.loading {
+  background-color: #d8dee9;
+  color: #6c757d;
+  cursor: wait;
+  opacity: 0.8;
+  position: relative;
 } 
