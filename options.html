@@ -106,6 +106,32 @@
         <small class="hint" style="margin: 0; flex-grow: 1;">Determine RED/ORANGE status proactively on tab switch using cached data (may impact performance negatively with large databases).</small>
       </div>
       
+      <!-- Auto-check Settings -->
+      <div class="input-group" style="margin-top: 15px;">
+        <label for="auto-check-enabled" style="text-align: left; flex-basis: auto; margin-right: 10px;">Auto-Check:</label>
+        <input type="checkbox" id="auto-check-enabled" style="width: auto; flex-grow: 0;">
+        <small class="hint" style="margin: 0 0 0 10px; flex-grow: 1;">Automatically check URL after staying on the same page for the specified time.</small>
+      </div>
+      
+      <div class="input-group auto-check-options" style="margin-top: 10px; margin-left: 20px;">
+        <label for="auto-check-delay">Delay (seconds):</label>
+        <input type="number" id="auto-check-delay" min="1" max="300" value="10" style="width: 80px; flex-grow: 0;">
+        <div style="margin-left: 10px;">
+          <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <input type="checkbox" id="auto-check-red" checked style="width: auto; margin-right: 5px;">
+            <label for="auto-check-red" style="flex-basis: auto; text-align: left; margin-right: 10px;">Red status (not in database)</label>
+          </div>
+          <div style="display: flex; align-items: center;">
+            <input type="checkbox" id="auto-check-orange" checked style="width: auto; margin-right: 5px;">
+            <label for="auto-check-orange" style="flex-basis: auto; text-align: left;">Orange status (partial match)</label>
+          </div>
+          <div style="display: flex; align-items: center; margin-top: 5px;">
+            <input type="checkbox" id="auto-check-green" style="width: auto; margin-right: 5px;">
+            <label for="auto-check-green" style="flex-basis: auto; text-align: left;">Green status (already in database)</label>
+          </div>
+        </div>
+      </div>
+      
       <!-- Add Log Level Selector -->
       <div class="input-group" style="margin-top: 15px;">
          <label for="log-level-select">Console Log Level:</label>

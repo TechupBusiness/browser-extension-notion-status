@@ -261,6 +261,13 @@ const elements = {
   aggressiveCachingToggle: document.getElementById('aggressive-caching-toggle'),
   logLevelSelect: document.getElementById('log-level-select'),
   
+  // Auto-check settings
+  autoCheckEnabled: document.getElementById('auto-check-enabled'),
+  autoCheckDelay: document.getElementById('auto-check-delay'),
+  autoCheckRed: document.getElementById('auto-check-red'),
+  autoCheckOrange: document.getElementById('auto-check-orange'),
+  autoCheckGreen: document.getElementById('auto-check-green'),
+  
   // General
   saveButton: document.getElementById('save-button'),
   // Remove global status message element
@@ -334,7 +341,10 @@ async function loadSettings() {
     'botId',
     'domainRules',
     'aggressiveCachingEnabled',
-    'logLevel'
+    'logLevel',
+    'autoCheckEnabled',
+    'autoCheckDelay',
+    'autoCheckStates'
   ]);
   
   return {
@@ -348,7 +358,10 @@ async function loadSettings() {
     botId: result.botId,
     domainRules: result.domainRules || DEFAULT_DOMAIN_RULES,
     aggressiveCachingEnabled: result.aggressiveCachingEnabled || false,
-    logLevel: result.logLevel || 'INFO'
+    logLevel: result.logLevel || 'INFO',
+    autoCheckEnabled: result.autoCheckEnabled || false,
+    autoCheckDelay: result.autoCheckDelay || 10, // Default: 10 seconds
+    autoCheckStates: result.autoCheckStates || { red: true, orange: true } // Default: check red and orange
   };
 }
 
@@ -443,6 +456,26 @@ async function updateUI(settings) {
   
   // Aggressive Caching Toggle
   elements.aggressiveCachingToggle.checked = settings.aggressiveCachingEnabled;
+  
+  // Auto-check settings
+  elements.autoCheckEnabled.checked = settings.autoCheckEnabled;
+  elements.autoCheckDelay.value = settings.autoCheckDelay;
+  elements.autoCheckRed.checked = settings.autoCheckStates?.red !== false; // Default to true if undefined
+  elements.autoCheckOrange.checked = settings.autoCheckStates?.orange !== false; // Default to true if undefined
+  elements.autoCheckGreen.checked = settings.autoCheckStates?.green === true; // Default to false if undefined
+  
+  // Toggle visibility of auto-check options based on enabled state
+  const autoCheckOptions = document.querySelector('.auto-check-options');
+  if (autoCheckOptions) {
+    autoCheckOptions.style.display = settings.autoCheckEnabled ? 'flex' : 'none';
+  }
+  
+  // Add event listener to toggle auto-check options visibility
+  elements.autoCheckEnabled.addEventListener('change', function() {
+    if (autoCheckOptions) {
+      autoCheckOptions.style.display = this.checked ? 'flex' : 'none';
+    }
+  });
   
   // Log Level Select
   elements.logLevelSelect.value = settings.logLevel;
@@ -1022,6 +1055,15 @@ async function handleSaveSettings() {
     const aggressiveCachingEnabled = elements.aggressiveCachingToggle.checked;
     const logLevel = elements.logLevelSelect.value;
     
+    // Auto-check settings
+    const autoCheckEnabled = elements.autoCheckEnabled.checked;
+    const autoCheckDelay = parseInt(elements.autoCheckDelay.value, 10) || 10; // Default to 10 seconds
+    const autoCheckStates = {
+      red: elements.autoCheckRed.checked,
+      orange: elements.autoCheckOrange.checked,
+      green: elements.autoCheckGreen.checked
+    };
+    
     // Validate token
     if (!integrationToken) {
       throw new Error('Please enter your Notion Integration Token');
@@ -1059,7 +1101,10 @@ async function handleSaveSettings() {
       cacheDuration,
       domainRules,
       aggressiveCachingEnabled,
-      logLevel
+      logLevel,
+      autoCheckEnabled,
+      autoCheckDelay,
+      autoCheckStates
     };
     
     // Only include database settings if they're selected and we are connected
