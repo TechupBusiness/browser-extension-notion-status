@@ -37,6 +37,9 @@ const LOG_LEVELS = {
 };
 let currentLogLevel = LOG_LEVELS.INFO; // Default log level
 
+// --- Auto-check tracking variables ---
+let autoCheckTimer = null;
+
 // --- Logger Functions --- 
 async function getLogLevel() {
   try {
@@ -82,16 +85,32 @@ async function init() {
   // updateLogLevel(); // Update log level on init
   // Set up listeners for tab changes
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // Handle complete page loads (new page is fully loaded)
     if (changeInfo.status === 'complete' && tab.active) {
+      logDebug(`Tab updated (complete): ${tab.url}`);
       // Only check cache on tab updates for performance
       checkCurrentUrl(tab.url, true);
+      // Set up auto-check timer for the new URL
+      resetAutoCheckTimer(tab.id, tab.url);
+    }
+    // Also handle URL changes that might happen without a full page reload
+    // (like single page apps or history.pushState)
+    else if (changeInfo.url && tab.active) {
+      logDebug(`Tab URL changed: ${changeInfo.url}`);
+      // URL changed but page might not be fully loaded yet
+      checkCurrentUrl(changeInfo.url, true);
+      // Reset the auto-check timer for the new URL
+      resetAutoCheckTimer(tab.id, changeInfo.url);
     }
   });
 
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
     const tab = await chrome.tabs.get(activeInfo.tabId);
+    logDebug(`Tab activated: ${tab.url}`);
     // Only check cache on tab activation for performance
     checkCurrentUrl(tab.url, true);
+    // Set up auto-check timer for the activated tab
+    resetAutoCheckTimer(tab.tabId, tab.url);
   });
 
   // Initial check for the active tab
@@ -99,15 +118,168 @@ async function init() {
   if (tabs.length > 0) {
     // Only check cache on initialization for performance
     checkCurrentUrl(tabs[0].url, true);
+    // Set up auto-check timer for the initial tab
+    resetAutoCheckTimer(tabs[0].id, tabs[0].url);
   }
   
   // Set up sync alarm
   setupSyncAlarm();
 }
 
+// Reset the auto-check timer when the tab/URL changes
+async function resetAutoCheckTimer(tabId, url) {
+  logInfo(`Reset Auto-Check Timer Called: tabId=${tabId}, url=${url}`);
+  
+  // Clear any existing timer
+  if (autoCheckTimer !== null) {
+    clearTimeout(autoCheckTimer);
+    autoCheckTimer = null;
+    logDebug('Cleared existing auto-check timer');
+  }
+  
+  // Get user configuration
+  const config = await getUserConfig();
+  
+  // Check if auto-check is enabled
+  if (!config.autoCheckEnabled || !config.autoCheckDelay) {
+    logDebug('Auto-check disabled or no delay set.');
+    return; // Auto-check disabled or no delay set
+  }
+  
+  // Log to verify tab ID is defined at this point
+  logInfo(`Auto-check timer starting: Will check in ${config.autoCheckDelay} seconds for tab=${tabId} url=${url}`);
+  
+  // Use an arrow function which properly captures the enclosing scope
+  autoCheckTimer = setTimeout(() => {
+    // Immediately create a separate function to handle the actual check
+    // This prevents issues with async/await in the timer callback
+    const performAutoCheck = async () => {
+      try {
+        // Log includes the original URL this timer was set for
+        logInfo(`Auto-check timer fired (Original URL: ${url})`);
+        
+        // Get the CURRENT active tab when timer fires
+        const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (currentTabs.length === 0) {
+          logInfo(`Auto-check canceled: No active tabs found when timer fired.`);
+          return;
+        }
+        const currentActiveTab = currentTabs[0];
+        
+        // Compare the current active tab's URL with the URL stored when timer was set
+        if (currentActiveTab.url !== url) {
+          logInfo(`Auto-check canceled: URL has changed (Current: ${currentActiveTab.url}, Original: ${url})`);
+          return;
+        }
+        
+        // If URL matches, proceed with checks
+        logInfo(`Auto-check: Active tab URL matches original. Proceeding with checks for ${url}`);
+        
+        // Get the current status and check if we should run
+        const { currentTabStatus } = await chrome.storage.local.get('currentTabStatus');
+        const state = currentTabStatus?.state || 'GRAY';
+        
+        // Check if we should proceed based on settings
+        let shouldCheck = false;
+        
+        // Skip if domain is excluded
+        if (currentTabStatus?.domainExcluded) {
+          logInfo(`Auto-check skipped: Domain is excluded by rules`);
+          return;
+        }
+        
+        // Check states against settings
+        if (state === 'RED' && config.autoCheckStates?.red) {
+          logInfo(`Auto-check proceeding: RED state is enabled for checking`);
+          shouldCheck = true;
+        } 
+        else if (state === 'ORANGE' && config.autoCheckStates?.orange) {
+          logInfo(`Auto-check proceeding: ORANGE state is enabled for checking`);
+          shouldCheck = true;
+        }
+        else if (state === 'GREEN' && config.autoCheckStates?.green) {
+          logInfo(`Auto-check proceeding: GREEN state is enabled for checking`);
+          shouldCheck = true;
+        }
+        else if (state === 'GRAY') {
+          logInfo(`Auto-check proceeding: GRAY state always checks`);
+          shouldCheck = true;
+        }
+        else {
+          logInfo(`Auto-check skipped: ${state} state is not enabled for checking`);
+          return;
+        }
+        
+        // Perform the API check
+        if (shouldCheck) {
+          logInfo(`Auto-check: Performing FULL API CHECK for URL: ${url}`);
+          // We'll directly check the URL with cacheOnly=false to force API call
+          await checkCurrentUrl(url, false);
+          logInfo(`Auto-check: API check completed for ${url}`);
+        }
+      } 
+      catch (error) {
+        logError(`Error in auto-check:`, error);
+      }
+    };
+    
+    // Execute the auto-check function
+    performAutoCheck();
+    
+  }, config.autoCheckDelay * 1000);
+}
+
+// Original helper function is kept for reference but not used directly anymore
+function shouldPerformAutoCheck(currentTabStatus, config) {
+  if (!currentTabStatus) {
+    logDebug('Auto-check evaluation: No current status, should check');
+    return true; // No status yet, perform check
+  }
+  
+  const currentState = currentTabStatus.state;
+  
+  // Skip if domain excluded
+  if (currentTabStatus.domainExcluded) {
+    logDebug('Auto-check skipped - domain excluded');
+    return false;
+  }
+  
+  // Skip if error state
+  if (currentTabStatus.error) {
+    logDebug('Auto-check skipped - in error state');
+    return false;
+  }
+  
+  // Check if current state is in the list of states to auto-check
+  if (currentState === 'RED' && config.autoCheckStates?.red) {
+    logDebug('Auto-check allowed - RED status and red checks enabled');
+    return true;
+  }
+  
+  if (currentState === 'ORANGE' && config.autoCheckStates?.orange) {
+    logDebug('Auto-check allowed - ORANGE status and orange checks enabled');
+    return true;
+  }
+  
+  if (currentState === 'GREEN' && config.autoCheckStates?.green) {
+    logDebug('Auto-check allowed - GREEN status and green checks enabled');
+    return true;
+  }
+  
+  // Also check for GRAY state - this means we don't know yet, so check
+  if (currentState === 'GRAY') {
+    logDebug('Auto-check allowed - GRAY status (unknown)');
+    return true;
+  }
+  
+  logDebug(`Auto-check skipped - state ${currentState} not enabled for checking`);
+  return false; // Default: don't perform check
+}
+
 // Refactored function to check URL status with two phases
 async function checkCurrentUrl(url, cacheOnly = false) {
   if (!url) {
+    logWarn('[URL Check] Received null/empty URL, setting GRAY');
     await setIconState('GRAY', { text: 'No URL available' });
     return;
   }
@@ -118,17 +290,21 @@ async function checkCurrentUrl(url, cacheOnly = false) {
     return;
   }
   currentlyCheckingUrls.add(url);
-  logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Starting check for URL: ${url}. Lock acquired.`);
+  logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] --- Starting check for URL: ${url} (cacheOnly=${cacheOnly}) ---`);
 
   // --- Set initial GRAY state while checking ---
-  await setIconState('GRAY'); 
+  // Set icon to gray immediately ONLY if not cacheOnly, otherwise wait for results
+  if (!cacheOnly) {
+    await setIconState('GRAY'); 
+  }
 
   try {
     // --- 1. Get Config and Check Domain Rules ---
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Step 1: Getting config and checking domain rules...`);
     const config = await getUserConfig();
     if (!config.integrationToken || !config.databaseId || !config.propertyName) {
+      logError('[URL Check] Extension not configured.');
       await setIconState('GRAY', { error: 'Extension not configured.' });
-      logError('Extension not configured.');
       return; // Exit early if not configured
     }
 
@@ -139,23 +315,26 @@ async function checkCurrentUrl(url, cacheOnly = false) {
       return; // Exit early if domain is excluded
     }
     const matchOnlySelf = (typeof domainRuleInfo === 'object' && domainRuleInfo.matchOnlySelf) || false;
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Domain rule check complete. matchOnlySelf=${matchOnlySelf}, Rule info:`, domainRuleInfo);
 
     // --- 2. Generate URLs to Check (Variations + Ancestors/Partials) ---
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Step 2: Generating URL variations and ancestors...`);
     const exactVariations = generateExactMatchVariations(url);
     let ancestorPartials = [];
     if (!matchOnlySelf) {
         if (domainRuleInfo === true) { 
             ancestorPartials = generateAncestorUrls(url); 
         } else if (typeof domainRuleInfo === 'object') { 
-            ancestorPartials = await generateCustomAncestorUrls(url, domainRuleInfo);
+            ancestorPartials = generateAncestorsBasedOnRule(new URL(url), domainRuleInfo);
         }
     } else {
         logDebug(`[URL Check] Skipping ancestor/partial generation for ${url} due to matchOnlySelf rule.`);
     }
     const allUrlsToCheck = Array.from(new Set([...exactVariations, ...ancestorPartials]));
-    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs to check (matchOnlySelf=${matchOnlySelf}):`, allUrlsToCheck);
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] URLs generated for checking:`, allUrlsToCheck);
 
     // --- 3. Check Cache --- 
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Step 3: Checking cache for ${allUrlsToCheck.length} URLs...`);
     const cachePromises = allUrlsToCheck.map(u => checkCache(u, config.cacheDuration));
     const cacheResults = await Promise.all(cachePromises);
     
@@ -170,180 +349,207 @@ async function checkCurrentUrl(url, cacheOnly = false) {
         const cacheEntry = cacheResults[i];
 
         if (cacheEntry) {
+            logDebug(`[Cache Result] URL: ${checkUrl} -> Status: ${cacheEntry.status}, Details:`, cacheEntry);
             if (cacheEntry.status === 'GREEN') {
-                logDebug(`[Cache Check] Found valid GREEN for: ${checkUrl} (points to ${cacheEntry.canonicalUrl})`);
                 foundGreen = cacheEntry;
                 allRed = false;
-                break; 
+                break; // Found exact match, stop cache check
             } else if (cacheEntry.status === 'ORANGE') {
-                 logDebug(`[Cache Check] Found ORANGE for: ${checkUrl}`);
                  if (!foundOrange) foundOrange = cacheEntry; 
                  cacheEntry.matchingUrls?.forEach(u => foundMatchingUrls.add(u));
                  allRed = false;
             } else if (cacheEntry.status === 'RED') {
-                 logDebug(`[Cache Check] Found RED for: ${checkUrl}`);
+                 // Stays allRed = true if this is the only type found
             }
         } else {
-             logDebug(`[Cache Check] Cache miss/expired for: ${checkUrl}`);
+             logDebug(`[Cache Result] URL: ${checkUrl} -> MISS/EXPIRED`);
              needsApiCheck = true;
-             allRed = false; 
+             allRed = false; // If there's a miss, it's not ALL red
         }
     }
+    logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Cache check summary: foundGreen=${!!foundGreen}, foundOrange=${!!foundOrange}, allRed=${allRed}, needsApiCheck=${needsApiCheck}`);
 
-    // --- 4. Determine Action Based on Cache Results ---
-    if (foundGreen) {
-        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: GREEN (from cache)`);
+    // --- 4. Determine Action Based on Cache Results --- 
+    logDebug(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Step 4: Determining action based on cache...`);
+    
+    // For cacheOnly=true, use the cache results and return
+    if (cacheOnly) {
+      if (foundGreen) {
+        logInfo(`[CacheOnly] Cache sufficient: Found GREEN. Setting icon.`);
         await setIconState('GREEN', { notionPageUrl: foundGreen.notionPageUrl }); 
-        // Optimization: Update cache for all *exact variations* to point to this canonical URL
-        // Ensure we also preserve notionPageUrl if updating cache here
         const cacheDetailsForVariations = { 
             canonicalUrl: foundGreen.canonicalUrl, 
             notionPageUrl: foundGreen.notionPageUrl 
         };
         const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', cacheDetailsForVariations));
         await Promise.all(updatePromises);
-        return; 
-    }
-    if (foundOrange) {
+        logDebug(`[CacheOnly] Updated cache for exact variations.`);
+        return; // --- EXIT POINT (GREEN from cache) --- 
+      }
+      
+      // Check for Orange ONLY if Green wasn't found
+      if (foundOrange) {
         const finalMatchingUrls = Array.from(foundMatchingUrls);
-        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: ORANGE (from cache), matches:`, finalMatchingUrls);
+        logInfo(`[CacheOnly] Cache sufficient: Found ORANGE. Setting icon. Matches:`, finalMatchingUrls);
         await setIconState('ORANGE', { matchingUrls: finalMatchingUrls });
-        return; 
-    }
-    if (allRed) {
-        logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Final state: RED (all variations/ancestors cached as RED)`);
+        return; // --- EXIT POINT (ORANGE from cache) --- 
+      }
+      
+      // Check for All Red ONLY if Green and Orange weren't found
+      if (allRed && !foundOrange) {
+        logInfo(`[CacheOnly] Cache sufficient: All variations/ancestors cached as RED. Setting icon.`);
         await setIconState('RED');
-        return; 
-    }
+        return; // --- EXIT POINT (RED from cache) --- 
+      }
 
-    // 4d. Cache was inconclusive (mix of RED and misses/expired, or only misses/expired)?
-    // If cacheOnly is true, check the aggressive caching setting
-    if (cacheOnly) {
-        logDebug(`[CacheOnly Debug] Cache check results for ${url}: `,
-                    `foundGreen: ${!!foundGreen}, `,
-                    `foundOrange: ${!!foundOrange}, `,
-                    `allRed: ${allRed}, `,
-                    `needsApiCheck: ${needsApiCheck}`);
-        if (config.aggressiveCachingEnabled) {
-            logInfo("[CacheOnly][Aggressive] Cache inconclusive, performing aggressive check against full cache...");
-            try {
-                const { urlCache = {} } = await chrome.storage.local.get('urlCache');
-                const validGreenUrls = Object.entries(urlCache)
-                    .filter(([_, entry]) => entry?.status === 'GREEN' && (Date.now() - entry.timestamp < config.cacheDuration * 60 * 1000))
-                    .map(([_, entry]) => entry.canonicalUrl)
-                    .filter(Boolean); // Ensure canonicalUrl exists
-                
-                logDebug(`[CacheOnly][Aggressive] Found ${validGreenUrls.length} valid GREEN URLs in cache to check against.`);
+      // Cache was inconclusive, try aggressive check or set GRAY
+      logDebug(`[CacheOnly] Cache inconclusive, and cacheOnly is true.`);
+      if (config.aggressiveCachingEnabled) {
+        logInfo("[CacheOnly][Aggressive] Performing aggressive check against full cache...");
+        try {
+           const { urlCache = {} } = await chrome.storage.local.get('urlCache');
+           const validGreenUrls = Object.entries(urlCache)
+               .filter(([_, entry]) => entry?.status === 'GREEN' && (Date.now() - entry.timestamp < config.cacheDuration * 60 * 1000))
+               .map(([_, entry]) => entry.canonicalUrl)
+               .filter(Boolean); // Ensure canonicalUrl exists
+           
+           logDebug(`[CacheOnly][Aggressive] Found ${validGreenUrls.length} valid GREEN URLs in cache to check against.`);
 
-                if (validGreenUrls.length === 0) {
-                     logInfo("[CacheOnly][Aggressive] No valid GREEN URLs in cache. Setting RED.");
-                     await updateCache(url, 'RED'); // Cache original URL as RED
-                     await setIconState('RED');
-                     return;
-                }
+           if (validGreenUrls.length === 0) {
+                logInfo("[CacheOnly][Aggressive] No valid GREEN URLs in cache. Setting RED.");
+                await updateCache(url, 'RED'); // Cache original URL as RED
+                await setIconState('RED');
+                return; // --- EXIT POINT (Aggressive RED) ---
+           }
 
-                // Perform aggressive check (respect allowsPartials from rule)
-                let aggressiveMatchFound = false;
-                const aggressiveMatchingUrls = new Set();
+           let aggressiveMatchFound = false;
+           const aggressiveMatchingUrls = new Set();
 
-                // Generate relevant check URLs based on allowsPartials
-                const urlsToCheckAggressively = [...exactVariations];
-                if (domainRuleInfo.allowsPartials) {
-                    try {
-                        const parsedUrl = new URL(url);
-                        const currentUrlAncestors = generateAncestorsBasedOnRule(parsedUrl, domainRuleInfo);
-                        urlsToCheckAggressively.push(...currentUrlAncestors);
-                    } catch(e) {
-                         logError("[CacheOnly][Aggressive] Error parsing URL or generating ancestors:", e);
-                    }
-                }
-                const uniqueUrlsToCheckAggressively = Array.from(new Set(urlsToCheckAggressively));
+           const urlsToCheckAggressively = [...exactVariations];
+           if (domainRuleInfo.allowsPartials) {
+               try {
+                   const parsedUrl = new URL(url);
+                   const currentUrlAncestors = generateAncestorsBasedOnRule(parsedUrl, domainRuleInfo);
+                   urlsToCheckAggressively.push(...currentUrlAncestors);
+               } catch(e) {
+                    logError("[CacheOnly][Aggressive] Error parsing URL or generating ancestors:", e);
+               }
+           }
+           const uniqueUrlsToCheckAggressively = Array.from(new Set(urlsToCheckAggressively));
+           logDebug("[CacheOnly][Aggressive] URLs to check aggressively:", uniqueUrlsToCheckAggressively);
 
-                logDebug("[CacheOnly][Aggressive] URLs to check aggressively (allowsPartials=${domainRuleInfo.allowsPartials}):", uniqueUrlsToCheckAggressively);
+           for (const cachedGreenUrl of validGreenUrls) {
+               try {
+                   const parsedCachedGreen = new URL(cachedGreenUrl);
+                   for (const checkUrl of uniqueUrlsToCheckAggressively) {
+                       try {
+                           const parsedCheckUrl = new URL(checkUrl);
+                           if (domainRuleInfo.allowsPartials && 
+                               parsedCheckUrl.hostname === parsedCachedGreen.hostname &&
+                               parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
+                               if (parsedCheckUrl.href !== parsedCachedGreen.href) {
+                                   logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
+                                   aggressiveMatchFound = true;
+                                   aggressiveMatchingUrls.add(cachedGreenUrl);
+                               }
+                           }
+                       } catch (parseError) {
+                           logWarn(`[CacheOnly][Aggressive] Error parsing checkUrl "${checkUrl}":`, parseError);
+                           continue;
+                       }
+                   }
+               } catch (e) {
+                   logWarn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
+               } 
+           }
 
-                // Loop through cached green URLs
-                for (const cachedGreenUrl of validGreenUrls) {
-                    try {
-                        const parsedCachedGreen = new URL(cachedGreenUrl);
-                        // Check against the generated list
-                        for (const checkUrl of uniqueUrlsToCheckAggressively) {
-                            // Parse the checkUrl before comparing
-                            try {
-                                const parsedCheckUrl = new URL(checkUrl);
-                                // Compare hostname and path prefix (for partials)
-                                if (domainRuleInfo.allowsPartials && // Only do partial check if allowed by rule
-                                    parsedCheckUrl.hostname === parsedCachedGreen.hostname &&
-                                    parsedCachedGreen.pathname.startsWith(parsedCheckUrl.pathname)) {
-                                    // Avoid matching the exact URL itself as a partial (already handled by GREEN check)
-                                    if (parsedCheckUrl.href !== parsedCachedGreen.href) {
-                                        logDebug(`[CacheOnly][Aggressive] Partial match found: ${url} (via ${checkUrl}) matches prefix of cached GREEN ${cachedGreenUrl}`);
-                                        aggressiveMatchFound = true;
-                                        aggressiveMatchingUrls.add(cachedGreenUrl);
-                                    }
-                                }
-                            } catch (parseError) {
-                                logWarn(`[CacheOnly][Aggressive] Error parsing checkUrl "${checkUrl}":`, parseError);
-                                continue; // Skip this URL and move to the next one
-                            }
-                        }
-                    } catch (e) {
-                        logWarn("[CacheOnly][Aggressive] Error parsing URL during aggressive check:", e);
-                    } 
-                }
+           if (aggressiveMatchFound) {
+               const finalMatches = Array.from(aggressiveMatchingUrls);
+               logInfo("[CacheOnly][Aggressive] Final state: ORANGE. Setting icon. Matches:", finalMatches);
+               await updateCache(url, 'ORANGE', { matchingUrls: finalMatches });
+               await setIconState('ORANGE', { matchingUrls: finalMatches });
+           } else {
+               logInfo("[CacheOnly][Aggressive] Final state: RED (no matches found). Setting icon.");
+               await updateCache(url, 'RED');
+               await setIconState('RED');
+           }
 
-                // Set state based on aggressive check result
-                if (aggressiveMatchFound) { // Will only be true if domainRuleInfo.allowsPartials is true
-                    const finalMatches = Array.from(aggressiveMatchingUrls);
-                    logInfo("[CacheOnly][Aggressive] Final state: ORANGE (determined from cache), matches:", finalMatches);
-                    await updateCache(url, 'ORANGE', { matchingUrls: finalMatches });
-                    await setIconState('ORANGE', { matchingUrls: finalMatches });
-                } else {
-                    logInfo("[CacheOnly][Aggressive] Final state: RED (no matches found in cached GREEN URLs or matchOnlySelf=true).");
-                    await updateCache(url, 'RED');
-                    await setIconState('RED');
-                }
-
-            } catch (error) {
-                logError("[CacheOnly][Aggressive] Error during aggressive cache check:", error);
-                // Fallback to GRAY if aggressive check fails
-                await setIconState('GRAY', { text: 'Aggressive cache check failed. Click icon.' });
-            }
-
-        } else {
-            logInfo(`[CacheOnly] Final state: GRAY (cache inconclusive, aggressive caching disabled)`);
-            await setIconState('GRAY', { text: 'Cached status unclear. Click icon to check Notion.' });
+        } catch (error) {
+           logError("[CacheOnly][Aggressive] Error during aggressive cache check:", error);
+           await setIconState('GRAY', { text: 'Aggressive cache check failed. Click icon.' });
         }
-        return; 
+      } else {
+        // ... existing inconclusive logic
+        if (foundOrange) {
+          const finalMatchingUrls = Array.from(foundMatchingUrls);
+          logInfo(`[CacheOnly] Cache inconclusive, aggressive OFF. Found ORANGE in cache. Setting icon. Matches:`, finalMatchingUrls);
+          await setIconState('ORANGE', { matchingUrls: finalMatchingUrls });
+        } else {
+          logInfo(`[CacheOnly] Cache inconclusive, aggressive OFF. Setting GRAY.`);
+          await setIconState('GRAY', { text: 'Cached status unclear. Click icon to check Notion.' });
+        }
+      }
+      return; // --- EXIT POINT (CacheOnly inconclusive handled) --- 
+    }
+    
+    // For cacheOnly=false, ALWAYS proceed to check the API regardless of cache
+    // but temporarily set the state based on cache results while API check is in progress
+    if (!cacheOnly) {
+      logInfo(`[API Check] Manual refresh requested (cacheOnly=false). Will check API regardless of cache.`);
+      
+      // Set temporary icon state based on cache results while API is being queried
+      if (foundGreen) {
+        logDebug(`[API Check] Temporarily using GREEN from cache while checking API...`);
+        await setIconState('GREEN', { 
+          notionPageUrl: foundGreen.notionPageUrl,
+          text: 'Checking with Notion...' 
+        });
+      } else if (foundOrange) {
+        logDebug(`[API Check] Temporarily using ORANGE from cache while checking API...`);
+        await setIconState('ORANGE', { 
+          matchingUrls: Array.from(foundMatchingUrls),
+          text: 'Checking with Notion...' 
+        });
+      } else if (allRed) {
+        logDebug(`[API Check] Temporarily using RED from cache while checking API...`);
+        await setIconState('RED', { text: 'Checking with Notion...' });
+      } else {
+        // Cache was inconclusive
+        logDebug(`[API Check] Setting GRAY while checking API...`);
+        await setIconState('GRAY', { text: 'Checking with Notion...' });
+      }
     }
 
-    // --- 5. Perform API Check (only if cacheOnly is false and cache was inconclusive) ---
-    logInfo(`[API Check] Cache inconclusive, proceeding with API calls.`);
+    // --- 5. Perform API Check (only if cacheOnly is false and cache was inconclusive) --- 
+    // Now it's for all cacheOnly=false cases, not just inconclusive ones
+    logInfo(`[API Check] Step 5: Proceeding with API calls for manual refresh.`);
+    await setIconState('GRAY'); // Ensure icon is Gray during API check
 
     try {
         // 5a. Check Exact Variations via API
-        logInfo("[API Check] Querying API for exact variations:", exactVariations);
+        logDebug("[API Check] Querying API for exact variations:", exactVariations);
         const exactApiResultPages = await queryNotionForMultipleUrls(exactVariations, config);
+        logInfo(`[API Check] Exact API query returned ${exactApiResultPages.length} result(s).`);
 
         if (exactApiResultPages.length > 0) {
             // --- Exact Match Found via API --- 
             const firstMatch = exactApiResultPages[0];
             const canonicalUrlFromApi = firstMatch.properties[config.propertyName]?.url || exactVariations[0]; // Fallback needed?
-            logInfo(`[API Check] Final state: GREEN (found via API: ${canonicalUrlFromApi})`);
+            const notionPageUrl = firstMatch.url;
+            logInfo(`[API Check] Final state: GREEN (found via API: ${canonicalUrlFromApi}). Notion URL: ${notionPageUrl}. Setting icon.`);
             
-            await setIconState('GREEN', { notionPageUrl: firstMatch.url }); 
-            // Update cache for all *exact variations* as GREEN
-            // Add the actual Notion page URL to the cache details
+            await setIconState('GREEN', { notionPageUrl: notionPageUrl }); 
             const cacheDetails = { 
               canonicalUrl: canonicalUrlFromApi, 
-              notionPageUrl: firstMatch.url 
+              notionPageUrl: notionPageUrl 
             };
             const updatePromises = exactVariations.map(v => updateCache(v, 'GREEN', cacheDetails));
             await Promise.all(updatePromises);
-            return; 
+            logDebug(`[API Check] Updated cache for exact variations as GREEN.`);
+            return; // --- EXIT POINT (GREEN from API) --- 
         } else {
-            logInfo("[API Check] No exact matches found via API.");
+            logInfo("[API Check] No exact matches found via API. Caching exact variations as RED.");
             // Cache *exact variations* as RED since API confirmed they aren't present
-            // --- Start Bulk Update --- 
             try {
                 const { urlCache = {} } = await chrome.storage.local.get('urlCache');
                 let changed = false;
@@ -351,40 +557,45 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                     if (!urlCache[variation] || urlCache[variation].status !== 'RED') {
                         urlCache[variation] = { status: 'RED', timestamp: Date.now() };
                         changed = true;
-                        logDebug(`[API Check] Marking exact variation ${variation} as RED in cache.`);
                     }
                 }
                 if (changed) {
                     await chrome.storage.local.set({ urlCache });
-                    logInfo("[API Check] Bulk updated exact variations cache to RED.");
+                    logDebug("[API Check] Bulk updated exact variations cache to RED.");
+                } else {
+                    logDebug("[API Check] Exact variations already cached as RED.");
                 }
             } catch(cacheError) {
                  logError("[API Check] Error bulk updating exact variations cache to RED:", cacheError);
             }
-            // --- End Bulk Update --- 
         }
 
         // 5b. Check Ancestors/Partials via API (only if no exact match found AND !matchOnlySelf)
+        let partialCheckPerformed = false;
         if (!matchOnlySelf && ancestorPartials.length > 0) {
-             logInfo("[API Check] Querying API for ancestors/partials:", ancestorPartials);
+             partialCheckPerformed = true;
+             logDebug("[API Check] Querying API for ancestors/partials:", ancestorPartials);
              const partialApiResultPages = await queryNotionForMultipleUrls(ancestorPartials, config);
+             logInfo(`[API Check] Partial API query returned ${partialApiResultPages.length} result(s).`);
 
              if (partialApiResultPages.length > 0) {
-                 // --- Partial/Ancestor Match Found via API ---
+                 // --- Partial/Ancestor Match Found via API --- 
                  const partialMatchingUrls = partialApiResultPages.map(p => p.properties[config.propertyName]?.url).filter(Boolean);
-                 logInfo(`[API Check] Final state: ORANGE (found ${partialMatchingUrls.length} ancestors/partials via API):`, partialMatchingUrls);
+                 logInfo(`[API Check] Final state: ORANGE (found ${partialMatchingUrls.length} ancestors/partials via API). Setting icon. Matches:`, partialMatchingUrls);
                  
                  await setIconState('ORANGE', { matchingUrls: partialMatchingUrls });
-                 // Update cache for the *original URL* as ORANGE
                  await updateCache(url, 'ORANGE', { matchingUrls: partialMatchingUrls });
                  // Update cache for the *found* ancestor URLs as GREEN
-                 const updatePromises = partialMatchingUrls.map(foundUrl => updateCache(foundUrl, 'GREEN', { canonicalUrl: foundUrl }));
+                 const updatePromises = partialMatchingUrls.map(foundUrl => { 
+                   const page = partialApiResultPages.find(p => p.properties[config.propertyName]?.url === foundUrl);
+                   return updateCache(foundUrl, 'GREEN', { canonicalUrl: foundUrl, notionPageUrl: page?.url });
+                 });
                  await Promise.all(updatePromises);
-                 return; 
+                 logDebug(`[API Check] Updated cache for original URL as ORANGE and found ancestors as GREEN.`);
+                 return; // --- EXIT POINT (ORANGE from API) --- 
              } else {
-                 logInfo("[API Check] No ancestors/partials found via API.");
+                 logInfo("[API Check] No ancestors/partials found via API. Caching checked ancestors/partials as RED.");
                  // Cache checked *ancestors/partials* as RED
-                 // --- Start Bulk Update --- 
                  try {
                     const { urlCache = {} } = await chrome.storage.local.get('urlCache');
                     let changed = false;
@@ -392,47 +603,53 @@ async function checkCurrentUrl(url, cacheOnly = false) {
                          if (!urlCache[ancestor] || urlCache[ancestor].status !== 'RED') {
                              urlCache[ancestor] = { status: 'RED', timestamp: Date.now() };
                              changed = true;
-                             logDebug(`[API Check] Marking ancestor/partial ${ancestor} as RED in cache.`);
                          }
                     }
                     if (changed) {
                          await chrome.storage.local.set({ urlCache });
-                         logInfo("[API Check] Bulk updated ancestors/partials cache to RED.");
+                         logDebug("[API Check] Bulk updated ancestors/partials cache to RED.");
+                    } else {
+                         logDebug("[API Check] Ancestors/partials already cached as RED.");
                     }
                  } catch(cacheError) {
                      logError("[API Check] Error bulk updating ancestor/partial cache to RED:", cacheError);
                  }
-                 // --- End Bulk Update ---
              }
         } else if (matchOnlySelf) {
-             logDebug("[API Check] Skipping ancestor/partial API check due to matchOnlySelf rule.");
+             logInfo("[API Check] Skipping ancestor/partial API check due to matchOnlySelf=true.");
+        } else {
+             logInfo("[API Check] Skipping ancestor/partial API check as no ancestorPartials were generated.");
         }
 
         // 5c. No Matches Found via API (Exact or Partial)
         // This state is reached if exact check failed AND (partial check failed OR partial check was skipped)
-        logInfo(`[API Check] Final state: RED (no matches found in API for relevant checks)`);
+        logInfo(`[API Check] Final state: RED (no matches found in API). Setting icon.`);
         await setIconState('RED');
-        // Note: RED caching for variations/ancestors already happened inside 5a/5b
-        return; 
+        // Caching as RED happened above for variations/ancestors if they were checked
+        // Ensure the *original URL* is also cached as RED if it wasn't already
+        await updateCache(url, 'RED'); 
+        return; // --- EXIT POINT (RED from API) --- 
 
     } catch (error) {
         logError('[API Check] Error during Notion API query:', error);
         let errorText = `API Error: ${error.message || 'Unknown'}`;
+        let needsReauth = false;
         if (error.status === 401) {
             errorText = 'Notion Authentication Failed.';
+            needsReauth = true;
             await chrome.storage.local.remove(['integrationToken', 'accessToken']); // Clear potentially bad token
             await chrome.storage.local.set({ needsAuthentication: true }); // Signal popup
         }
-        await setIconState('GRAY', { error: errorText });
+        await setIconState('GRAY', { error: errorText, needsAuthentication: needsReauth });
         return; // Stop processing on API error
     }
 
   } catch (error) {
-    logError(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Unhandled error during checkCurrentUrl for ${url}:`, error);
+    logError(`[URL Check] Unhandled error during checkCurrentUrl for ${url}:`, error);
     await setIconState('GRAY', { error: `Error: ${error.message || 'Unknown error'}` });
   } finally {
     currentlyCheckingUrls.delete(url);
-    logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] Finished check for URL: ${url}. Lock released.`);
+    logInfo(`[${cacheOnly ? 'CacheOnly' : 'API Check'}] --- Finished check for URL: ${url} ---`);
   }
 }
 
@@ -445,7 +662,10 @@ async function getUserConfig() {
     'cacheDuration',
     'lastEditedPropertyName',
     'aggressiveCachingEnabled',
-    'logLevel' // Ensure logLevel is loaded here
+    'logLevel',
+    'autoCheckEnabled',
+    'autoCheckDelay',
+    'autoCheckStates'
   ]);
   
   return {
@@ -455,7 +675,10 @@ async function getUserConfig() {
     cacheDuration: typeof result.cacheDuration === 'number' ? result.cacheDuration : 60,
     lastEditedPropertyName: result.lastEditedPropertyName,
     aggressiveCachingEnabled: result.aggressiveCachingEnabled || false,
-    logLevel: result.logLevel || 'INFO' // Add logLevel return
+    logLevel: result.logLevel || 'INFO',
+    autoCheckEnabled: result.autoCheckEnabled || false,
+    autoCheckDelay: result.autoCheckDelay || 10, // Default: 10 seconds
+    autoCheckStates: result.autoCheckStates || { red: true, orange: true } // Default: check red and orange
   };
 }
 
@@ -890,6 +1113,31 @@ async function performDeltaSync() {
 // Start the extension
 init();
 
+// Listen for settings changes to apply them immediately
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    const relevantChanges = [
+      'autoCheckEnabled', 
+      'autoCheckDelay', 
+      'autoCheckStates'
+    ];
+    
+    // Check if any auto-check settings changed
+    const hasAutoCheckChanges = relevantChanges.some(key => changes[key]);
+    
+    if (hasAutoCheckChanges) {
+      logInfo('Auto-check settings changed, applying immediately');
+      
+      // Re-check the current tab with the new settings
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) {
+          resetAutoCheckTimer(tabs[0].id, tabs[0].url);
+        }
+      });
+    }
+  }
+});
+
 // Listen for messages from the popup and options page
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   logDebug("Message received:", message);
@@ -946,6 +1194,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // Use full check (API if needed) when explicitly requested
       checkCurrentUrl(message.url, false).then(() => {
+        // After the check completes, consider resetting the auto-check timer
+        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+          if (tabs.length > 0 && tabs[0].url === message.url) {
+            const config = await getUserConfig();
+            // Only reset the auto-check timer if auto-check is enabled
+            if (config.autoCheckEnabled) {
+              // Start a fresh timer with full delay
+              logInfo('Manual refresh completed. Resetting auto-check timer with full delay.');
+              resetAutoCheckTimer(tabs[0].id, tabs[0].url);
+            } else {
+              logDebug('Auto-check disabled, not resetting timer after manual check');
+            }
+          }
+        });
+        
         sendResponse({ success: true });
       }).catch(error => {
         logError('Error triggering check for URL:', message.url, error);
